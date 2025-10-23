@@ -12,6 +12,15 @@ export function Popup() {
     return tab
   }
 
+  async function handleAction(action: () => Promise<string | string[]>) {
+    try {
+      const result = await action()
+      setOut(Array.isArray(result) ? result.join('\n') : result)
+    } catch (e: any) {
+      setOut(`Erreur : ${e.message}`)
+    }
+  }
+
   return (
     <div style={{ width: 320, padding: 12, fontFamily: 'system-ui' }}>
       <header style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8 }}>
@@ -20,30 +29,28 @@ export function Popup() {
       </header>
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-        <button onClick={async () => {
+        <button onClick={() => handleAction(async () => {
           const tab = await getActiveTab()
           const [{ result }] = await chrome.scripting.executeScript({
             target: { tabId: tab.id! },
             func: () => ({ title: document.title, text: document.body?.innerText?.slice(0, 120000) || '' })
           })
           setOut('⏳ Résumé…')
-          const bullets = await summarizePage(`${result.title}\n\n${result.text}`)
-          setOut(bullets.join('\n'))
-        }}>Résumer</button>
+          return summarizePage(`${result.title}\n\n${result.text}`)
+        })}>Résumer</button>
 
-        <button onClick={async () => {
+        <button onClick={() => handleAction(async () => {
           const tab = await getActiveTab()
           const [{ result: sel }] = await chrome.scripting.executeScript({
             target: { tabId: tab.id! },
             func: () => window.getSelection()?.toString() || ''
           })
-          if (!sel) return setOut('Sélection vide.')
+          if (!sel) return 'Sélection vide.'
           setOut('⏳ Traduction…')
-          const t = await translateText(sel, 'en')
-          setOut(t)
-        }}>Traduire</button>
+          return translateText(sel, 'en')
+        })}>Traduire</button>
 
-        <button onClick={async () => {
+        <button onClick={() => handleAction(async () => {
           const tab = await getActiveTab()
           setOut('⏳ Correction…')
           const [{ result }] = await chrome.scripting.executeScript({
@@ -55,7 +62,7 @@ export function Popup() {
               return { isEditable, text }
             }
           })
-          if (!result.isEditable) return setOut('Placez le curseur dans un champ éditable.')
+          if (!result.isEditable) return 'Placez le curseur dans un champ éditable.'
           const fixed = await proofreadText(result.text)
           await chrome.scripting.executeScript({
             target: { tabId: tab.id! },
@@ -66,19 +73,18 @@ export function Popup() {
               if ('value' in el) el.value = v; else el.innerText = v
             }
           })
-          setOut('✓ Correction appliquée.')
-        }}>Corriger</button>
+          return '✓ Correction appliquée.'
+        })}>Corriger</button>
 
-        <button onClick={async () => {
+        <button onClick={() => handleAction(async () => {
           const tab = await getActiveTab()
           const [{ result: ctx }] = await chrome.scripting.executeScript({
             target: { tabId: tab.id! },
             func: () => (document.title + "\n\n" + document.body?.innerText?.slice(0, 5000))
           })
           setOut('⏳ Rédaction…')
-          const txt = await writeFromContext(ctx, { task: 'Draft a concise email (80–120 words) in English.' })
-          setOut(txt)
-        }}>Rédiger</button>
+          return writeFromContext(ctx, { task: 'Draft a concise email (80–120 words) in English.' })
+        })}>Rédiger</button>
       </div>
 
       <section style={{ marginTop: 10, padding: 10, border: '1px solid #e5e7eb', borderRadius: 12, whiteSpace: 'pre-wrap', minHeight: 48 }}>
