@@ -1,6 +1,8 @@
+/// <reference types="node" />
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import { fileURLToPath, URL } from 'node:url'
+import path from 'node:path'
 
 export default defineConfig({
   plugins: [react()],
@@ -14,9 +16,9 @@ export default defineConfig({
     emptyOutDir: true,
     rollupOptions: {
       input: {
-        popup: 'src/popup/index.html',
-        background: 'src/background/index.ts',
-        content: 'src/content/index.ts'
+        popup: path.resolve(__dirname, 'src/popup/index.html'),
+        background: path.resolve(__dirname, 'src/background/index.ts'),
+        content: path.resolve(__dirname, 'src/content/index.ts'),
       },
       output: {
         entryFileNames: (chunk) => {
