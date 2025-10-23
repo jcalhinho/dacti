@@ -1,0 +1,19 @@
+{
+  "manifest_version": 3,
+  "name": "DACTI — Client-side Web AI",
+  "version": "0.1.0",
+  "description": "Résumé, traduction, correction et rédaction — en local avec Chrome Built-in AI (Gemini Nano).",
+  "action": { "default_popup": "src/popup/index.html", "default_title": "DACTI" },
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "permissions": ["activeTab", "scripting", "contextMenus", "storage"],
+  "host_permissions": ["<all_urls>"],
+  "background": { "service_worker": "background/index.js", "type": "module" },
+  "content_scripts": [
+    { "matches": ["<all_urls>"], "js": ["content/index.js"], "run_at": "document_idle" }
+  ]
+}
