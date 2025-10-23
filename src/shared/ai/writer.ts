@@ -1,31 +1,31 @@
-import { callGeminiApi } from './gemini-api';
+import { callGeminiApi } from './gemini-api'
 
 export async function writeFromContext(
   context: string,
-  options: { task: string },
-  progressOptions: { onProgress?: (progress: number) => void } = {}
+  task: { task: string },
+  options: { onProgress?: (p: number) => void; localOnly?: boolean } = {}
 ): Promise<string> {
-  try {
-    // @ts-ignore
-    if (typeof ai === 'undefined' || (await ai.canCreateTextSession()) === 'no') {
-      throw new Error("Local AI not available, falling back to cloud.");
+  // On-device d’abord
+  // @ts-ignore
+  const canLocal = typeof ai !== 'undefined' && ai?.writer?.create
+  if (canLocal) {
+    try {
+      // @ts-ignore
+      const wr = await ai.writer.create({ model: 'gemini-nano' })
+      const out = await wr.write({ instruction: task.task, context })
+      return String(out?.text ?? out ?? '')
+    } catch (e) {
+      if (options?.localOnly) throw e
     }
-
-    // @ts-ignore
-    const writer = await ai.writer.create({
-      model: 'gemini-nano',
-      monitor: (m: any) => {
-        if (progressOptions.onProgress) {
-          m.addEventListener('downloadprogress', (e: any) => {
-            progressOptions.onProgress?.(e.loaded);
-          });
-        }
-      },
-    });
-    return (await writer.generate({ context, ...options })).text;
-  } catch (e) {
-    console.warn("Error with local AI, using Gemini Cloud API:", e);
-    const prompt = `Task: ${options.task}\n\nContext:\n${context}\n\nResponse (only the requested text, without introduction):`;
-    return callGeminiApi(prompt);
   }
+
+  if (options?.localOnly) {
+    throw new Error('Local-only mode is enabled; cloud write is disabled.')
+  }
+
+  const prompt = `${task.task}
+
+Context:
+${context}`
+  return callGeminiApi(prompt)
 }

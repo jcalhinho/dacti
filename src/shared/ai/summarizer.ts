@@ -1,33 +1,27 @@
-import { callGeminiApi } from './gemini-api';
+import { callGeminiApi } from './gemini-api'
 
 export async function summarizePage(
   text: string,
-  options: { onProgress?: (progress: number) => void } = {}
-): Promise<string[]> {
-  try {
-    // @ts-ignore
-    if (typeof ai === 'undefined' || (await ai.canCreateTextSession()) === 'no') {
-      throw new Error("Local AI not available, falling back to cloud.");
+  options: { onProgress?: (p: number) => void; localOnly?: boolean } = {}
+): Promise<string> {
+  // On-device d’abord
+  // @ts-ignore
+  const canLocal = typeof ai !== 'undefined' && ai?.summarizer?.create
+  if (canLocal) {
+    try {
+      // @ts-ignore
+      const sm = await ai.summarizer.create({ model: 'gemini-nano' })
+      const out = await sm.summarize({ text })
+      return String(out?.text ?? out ?? '')
+    } catch (e) {
+      if (options?.localOnly) throw e
     }
-
-    // @ts-ignore
-    const summarizer = await ai.summarizer.create({
-      model: 'gemini-nano',
-      monitor: (m: any) => {
-        if (options.onProgress) {
-          m.addEventListener('downloadprogress', (e: any) => {
-            options.onProgress?.(e.loaded);
-          });
-        }
-      },
-    });
-    const res = await summarizer.summarize({ text, format: 'bullets', max_points: 6 });
-    return res.points;
-  } catch (e) {
-    console.warn("Error with local AI, using Gemini Cloud API:", e);
-    const prompt = `Summarize the following text into a bulleted list (maximum 6 points). Provide only the list, without any introduction or conclusion.\n\nText:\n${text}`;
-    const result = await callGeminiApi(prompt);
-    // Transform the output into an array of strings, as the local API would.
-    return result.split('\n').filter(line => line.trim().startsWith('•') || line.trim().startsWith('*'));
   }
+
+  if (options?.localOnly) {
+    throw new Error('Local-only mode is enabled; cloud summarize is disabled.')
+  }
+
+  const prompt = 'Summarize the following content in 5–7 concise bullet points. Use clear, neutral language.\n\n' + text
+  return callGeminiApi(prompt)
 }

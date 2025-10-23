@@ -8,6 +8,17 @@ export function Popup() {
   const [out, setOut] = useState('')
   const [isLoading, setIsLoading] = useState(false)
   const [downloadProgress, setDownloadProgress] = useState<number | null>(null)
+  const [localOnly, setLocalOnly] = useState(false)
+
+  React.useEffect(() => {
+    chrome.storage.local.get('dactiLocalOnly').then(({ dactiLocalOnly }) => {
+      setLocalOnly(Boolean(dactiLocalOnly))
+    })
+  }, [])
+
+  React.useEffect(() => {
+    chrome.storage.local.set({ dactiLocalOnly: localOnly })
+  }, [localOnly])
 
   async function getActiveTab() {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
@@ -61,6 +72,16 @@ export function Popup() {
         <h1 style={{ fontSize: 16, margin: 0 }}>DACTI</h1>
       </header>
 
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+        <label style={{ fontSize: 12, display: 'flex', alignItems: 'center', gap: 6 }}>
+          <input type="checkbox" checked={localOnly} onChange={(e) => setLocalOnly(e.target.checked)} />
+          Local only (on‑device)
+        </label>
+        {localOnly && (
+          <span style={{ fontSize: 11, padding: '2px 6px', border: '1px solid #d1d5db', borderRadius: 999 }}>Runs on‑device</span>
+        )}
+      </div>
+
       {downloadProgress !== null && (
         <div style={{ margin: '8px 0' }}>
           <label htmlFor="progress" style={{ fontSize: 12, display: 'block', marginBottom: 4 }}>
@@ -78,7 +99,7 @@ export function Popup() {
             func: () => ({ title: document.title, text: document.body?.innerText?.slice(0, 120000) || '' })
           })
           setOut('⏳ Summarizing...')
-          return summarizePage(`${result.title}\n\n${result.text}`, { onProgress })
+         return summarizePage(`${result.title}\n\n${result.text}`, { onProgress, localOnly })
         })} />
         <ActionButton icon="/icons/translate.svg" label="Translate" onClick={() => handleAction(async (onProgress) => {
           const tab = await getActiveTab()
@@ -88,7 +109,7 @@ export function Popup() {
           })
           if (!sel) return 'Empty selection.'
           setOut('⏳ Translating...')
-          return translateText(sel, 'en', { onProgress })
+         return translateText(sel, 'en', { onProgress, localOnly })
         })} />
         <ActionButton icon="/icons/proofread.svg" label="Proofread" onClick={() => handleAction(async (onProgress) => {
           const tab = await getActiveTab()
@@ -103,7 +124,7 @@ export function Popup() {
             }
           })
           if (!result.isEditable) return 'Place the cursor in an editable field.'
-          const fixed = await proofreadText(result.text, { onProgress })
+          const fixed = await proofreadText(result.text, { onProgress, localOnly })
           await chrome.scripting.executeScript({
             target: { tabId: tab.id! },
             args: [fixed],
@@ -122,7 +143,7 @@ export function Popup() {
             func: () => (document.title + "\n\n" + document.body?.innerText?.slice(0, 5000))
           })
           setOut('⏳ Writing...')
-          return writeFromContext(ctx, { task: 'Draft a concise email (80–120 words) in English.' }, { onProgress })
+         return writeFromContext(ctx, { task: 'Draft a concise email (80–120 words) in English.' }, { onProgress, localOnly })
         })} />
       </div>
 
