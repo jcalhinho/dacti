@@ -7,7 +7,7 @@ export async function summarizePage(
   try {
     // @ts-ignore
     if (typeof ai === 'undefined' || (await ai.canCreateTextSession()) === 'no') {
-      throw new Error("IA locale non disponible, passage au cloud.");
+      throw new Error("Local AI not available, falling back to cloud.");
     }
 
     // @ts-ignore
@@ -24,10 +24,10 @@ export async function summarizePage(
     const res = await summarizer.summarize({ text, format: 'bullets', max_points: 6 });
     return res.points;
   } catch (e) {
-    console.warn("Erreur avec l'IA locale, utilisation de l'API Gemini Cloud:", e);
-    const prompt = `Résume le texte suivant en une liste à puces (maximum 6 points). Ne fournis que la liste, sans introduction ni conclusion.\n\nTexte:\n${text}`;
+    console.warn("Error with local AI, using Gemini Cloud API:", e);
+    const prompt = `Summarize the following text into a bulleted list (maximum 6 points). Provide only the list, without any introduction or conclusion.\n\nText:\n${text}`;
     const result = await callGeminiApi(prompt);
-    // Transforme la sortie en tableau de chaînes, comme le ferait l'API locale.
+    // Transform the output into an array of strings, as the local API would.
     return result.split('\n').filter(line => line.trim().startsWith('•') || line.trim().startsWith('*'));
   }
 }
