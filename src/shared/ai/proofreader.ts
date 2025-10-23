@@ -7,7 +7,7 @@ export async function proofreadText(
   try {
     // @ts-ignore
     if (typeof ai === 'undefined' || (await ai.canCreateTextSession()) === 'no') {
-      throw new Error("IA locale non disponible, passage au cloud.");
+      throw new Error("Local AI not available, falling back to cloud.");
     }
 
     // @ts-ignore
@@ -23,8 +23,8 @@ export async function proofreadText(
     });
     return (await pr.correct({ text })).text;
   } catch (e) {
-    console.warn("Erreur avec l'IA locale, utilisation de l'API Gemini Cloud:", e);
-    const prompt = `Corrige les erreurs de grammaire et d'orthographe dans le texte suivant. Ne fournis que le texte corrigé, sans aucune explication ou phrase d'introduction.\n\nTexte:\n"${text}"`;
+    console.warn("Error with local AI, using Gemini Cloud API:", e);
+    const prompt = `Correct the grammar and spelling errors in the following text. Provide only the corrected text, without any explanation or introductory sentence.\n\nText:\n"${text}"`;
     return callGeminiApi(prompt);
   }
 }

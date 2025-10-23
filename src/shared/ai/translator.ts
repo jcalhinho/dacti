@@ -8,7 +8,7 @@ export async function translateText(
   try {
     // @ts-ignore
     if (typeof ai === 'undefined' || (await ai.canCreateTextSession()) === 'no') {
-      throw new Error("IA locale non disponible, passage au cloud.");
+      throw new Error("Local AI not available, falling back to cloud.");
     }
 
     // @ts-ignore
@@ -24,8 +24,8 @@ export async function translateText(
     });
     return (await translator.translate({ text, to })).text;
   } catch (e) {
-    console.warn("Erreur avec l'IA locale, utilisation de l'API Gemini Cloud:", e);
-    const prompt = `Traduis le texte suivant en ${to}. Ne fournis que la traduction, sans aucune explication ou phrase d'introduction.\n\nTexte:\n"${text}"`;
+    console.warn("Error with local AI, using Gemini Cloud API:", e);
+    const prompt = `Translate the following text to ${to}. Provide only the translation, without any explanation or introductory sentence.\n\nText:\n"${text}"`;
     return callGeminiApi(prompt);
   }
 }

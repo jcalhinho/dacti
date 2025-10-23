@@ -8,7 +8,7 @@ export async function writeFromContext(
   try {
     // @ts-ignore
     if (typeof ai === 'undefined' || (await ai.canCreateTextSession()) === 'no') {
-      throw new Error("IA locale non disponible, passage au cloud.");
+      throw new Error("Local AI not available, falling back to cloud.");
     }
 
     // @ts-ignore
@@ -24,8 +24,8 @@ export async function writeFromContext(
     });
     return (await writer.generate({ context, ...options })).text;
   } catch (e) {
-    console.warn("Erreur avec l'IA locale, utilisation de l'API Gemini Cloud:", e);
-    const prompt = `Tâche: ${options.task}\n\nContexte:\n${context}\n\nRéponse (uniquement le texte demandé, sans introduction):`;
+    console.warn("Error with local AI, using Gemini Cloud API:", e);
+    const prompt = `Task: ${options.task}\n\nContext:\n${context}\n\nResponse (only the requested text, without introduction):`;
     return callGeminiApi(prompt);
   }
 }
