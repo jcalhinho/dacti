@@ -6,7 +6,7 @@ const API_KEY = import.meta.env.VITE_GEMINI_API_KEY;
 const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${API_KEY}`;
 
 export async function callGeminiApi(prompt: string): Promise<string> {
-  if (!API_KEY || API_KEY === 'VOTRE_CLÉ_API_ICI') {
+  if (!API_KEY) {
     throw new Error('La clé API Gemini n\'est pas configurée. Veuillez l\'ajouter à votre fichier .env.local.');
   }
 
