@@ -28,7 +28,7 @@
     const host = h('div') as HTMLDivElement
     host.id = 'dacti-floating-panel'
     Object.assign(host.style, {
-      position: 'fixed', top: '0px', right: '16px', width: '320px', height: '100vh', zIndex: '2147483647', contain: 'content'
+      position: 'fixed', top: '0px', right: '16px', width: '320px', height: '100vh', zIndex: '2147483647', contain: 'layout'
     })
     document.documentElement.appendChild(host)
 
@@ -36,8 +36,8 @@
     const style = h('style') as HTMLStyleElement
     style.textContent = `
       :host { all: initial; }
-      .wrap { box-sizing: border-box; display: flex; flex-direction: column; width: 100%; height: 100%; background: #fff; color: #111827; border-left: 1px solid #e5e7eb; box-shadow: 0 12px 40px rgba(0,0,0,.18); font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
-      .header { display:flex; align-items:center; justify-content:space-between; gap:8px; padding:10px 12px; cursor: move; user-select:none; background:#f8fafc; border-bottom:1px solid #e5e7eb; }
+      .wrap { box-sizing: border-box; display: flex; flex-direction: column;border-radius: 20px;border: 2px solid #7c94c5ff; width: 100%; height: 100%; background: #fff; color: #111827;  box-shadow: 0 12px 40px rgba(0,0,0,.18); font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
+      .header { display:flex; align-items:center; justify-content:space-between; border-top-left-radius:20px; border-top-right-radius:20px; gap:8px; padding:10px 12px; cursor: move; user-select:none; background:#f8fafc; border-bottom:1px solid #e5e7eb; }
       .title { font-weight:600; font-size:13px; color:#0f172a; }
       .close { appearance:none; border:1px solid #e5e7eb; background:#fff; border-radius:8px; width:28px; height:28px; display:grid; place-items:center; cursor:pointer; }
       .close:hover { background:#f3f4f6; }
