@@ -1,172 +1,136 @@
 // Unified cloud caller with optional proxy support. No API keys hardcoded in bundle.
-// Settings (chrome.storage.local):
-//  - dactiCloudEnabled: boolean
+// Settings stored in chrome.storage.local:
+//  - dactiCloudEnabled: boolean (defaults to true)
 //  - dactiCloudMode: 'proxy' | 'userkey'
 //  - dactiProxyUrl: string (e.g., https://your-proxy.example.com)
-//  - dactiProxyToken: string (optional bearer passed to proxy)
-//  - dactiUserApiKey: string (NOT RECOMMENDED; user-provided Gemini key)
+//  - dactiProxyToken: string (optional bearer token for proxy)
+//  - dactiUserApiKey: string (user-provided Gemini API key)
 
-export async function callGeminiApi(prompt: string, options: { signal?: AbortSignal } = {}): Promise<string> {
-  const {
-    dactiCloudEnabled,
-    dactiCloudMode,
-    dactiProxyUrl,
-    dactiProxyToken,
-    dactiUserApiKey,
-  } = await chrome.storage.local.get([
+type CloudConfig = {
+  enabled: boolean;
+  mode: 'proxy' | 'userkey' | '';
+  proxyUrl: string;
+  proxyToken: string;
+  userApiKey: string;
+};
+
+async function getCloudConfig(): Promise<CloudConfig> {
+  const values = await chrome.storage.local.get([
     'dactiCloudEnabled',
     'dactiCloudMode',
     'dactiProxyUrl',
     'dactiProxyToken',
     'dactiUserApiKey',
-  ])
+    // Back-compatibility keys
+    'dactiProxyURL',
+    'proxyUrl',
+    'PROXY_URL',
+    'proxyToken',
+    'PROXY_TOKEN',
+  ]);
 
-  // Back-compat keys and normalization
-  const extra = await chrome.storage.local.get([
-    'dactiProxyURL','proxyUrl','PROXY_URL','proxyToken','PROXY_TOKEN'
-  ])
-  const cloudModeRaw = typeof dactiCloudMode === 'string' ? dactiCloudMode.trim() : ''
-  const proxyUrlCanon = typeof dactiProxyUrl === 'string' ? dactiProxyUrl.trim() : ''
-  const proxyUrlCompat = [extra?.dactiProxyURL, extra?.proxyUrl, extra?.PROXY_URL]
-    .map(v => typeof v === 'string' ? v.trim() : '')
-    .find(v => !!v) || ''
-  let proxyUrlRaw = proxyUrlCanon || proxyUrlCompat
-  const userKeyRaw = typeof dactiUserApiKey === 'string' ? dactiUserApiKey.trim() : ''
-  const proxyTokCanon = typeof dactiProxyToken === 'string' ? dactiProxyToken.trim() : ''
-  const proxyTokCompat = [extra?.proxyToken, extra?.PROXY_TOKEN]
-    .map(v => typeof v === 'string' ? v.trim() : '')
-    .find(v => !!v) || ''
-  let proxyTokenRaw = proxyTokCanon || proxyTokCompat
+  const config: CloudConfig = {
+    enabled: typeof values.dactiCloudEnabled === 'boolean' ? values.dactiCloudEnabled : true,
+    mode: '',
+    proxyUrl: [
+      values.dactiProxyUrl,
+      values.dactiProxyURL,
+      values.proxyUrl,
+      values.PROXY_URL,
+    ].find(v => typeof v === 'string' && v.trim())?.trim() || '',
+    proxyToken: [
+      values.dactiProxyToken,
+      values.proxyToken,
+      values.PROXY_TOKEN,
+    ].find(v => typeof v === 'string' && v.trim())?.trim() || '',
+    userApiKey: typeof values.dactiUserApiKey === 'string' ? values.dactiUserApiKey.trim() : '',
+  };
 
-  // Last-resort sweep across all keys if nothing found (handles dev console sets)
-  if (!proxyUrlRaw || !proxyTokenRaw) {
-    try {
-      const all: Record<string, any> = await chrome.storage.local.get(null as any)
-      const pick = (pred: (k: string, v: any) => boolean) => {
-        for (const [k,v] of Object.entries(all||{})) if (pred(k,v)) return typeof v === 'string' ? v.trim() : ''
-        return ''
-      }
-      if (!proxyUrlRaw) proxyUrlRaw = pick((k) => /proxy.*url/i.test(k) || /PROXY_URL/i.test(k))
-      if (!proxyTokenRaw) proxyTokenRaw = pick((k) => /proxy.*token/i.test(k) || /PROXY_TOKEN/i.test(k))
-    } catch {}
+  if (values.dactiCloudMode === 'proxy' || values.dactiCloudMode === 'userkey') {
+    config.mode = values.dactiCloudMode;
+  } else if (config.proxyUrl) {
+    config.mode = 'proxy';
+  } else if (config.userApiKey) {
+    config.mode = 'userkey';
   }
 
-  // Auto-fix: if a proxy URL or user API key exists but cloud mode isn't set, persist a sane default
-  try {
-    const patch: Record<string, any> = {}
-    if (!cloudModeRaw) {
-      if (proxyUrlRaw) patch.dactiCloudMode = 'proxy'
-      else if (userKeyRaw) patch.dactiCloudMode = 'userkey'
-    }
-    if (Object.keys(patch).length) {
-      if (typeof dactiCloudEnabled !== 'boolean') patch.dactiCloudEnabled = true
-      await chrome.storage.local.set(patch)
-    }
-  } catch {}
-
-  // Infer mode; cloud enabled by default unless explicitly disabled
-  let mode: 'proxy' | 'userkey' | '' = (cloudModeRaw === 'proxy' || cloudModeRaw === 'userkey') ? (cloudModeRaw as any) : ''
-  if (!mode) {
-    if (proxyUrlRaw) mode = 'proxy'
-    else if (userKeyRaw) mode = 'userkey'
-  }
-  const cloudEnabled = (typeof dactiCloudEnabled === 'boolean') ? dactiCloudEnabled : true
-  if (!cloudEnabled) {
-    throw new Error('Cloud fallback is disabled in settings. Enable it in the panel or set dactiCloudEnabled=true.')
-  }
-
-  if (mode === 'proxy') {
-    const base = proxyUrlRaw
-    if (!base) throw new Error('Cloud proxy is not configured.')
-    const url = base.replace(/\/$/, '') + '/generate'
-    const extId = (typeof chrome !== 'undefined' && chrome?.runtime?.id) ? chrome.runtime.id : ''
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...(proxyTokenRaw ? { 'Authorization': `Bearer ${proxyTokenRaw}` } : {}),
-        ...(extId ? { 'x-dacti-ext-id': extId } : {}),
-      },
-      body: JSON.stringify({ prompt }),
-      signal: options.signal,
-    })
-    if (!res.ok) {
-      const body = await safeText(res)
-      throw new Error(`Proxy error ${res.status}: ${body}`)
-    }
-    const data = await res.json().catch(() => ({} as any))
-    const text = data?.text ?? data?.output ?? data?.result ?? ''
-    if (!text) throw new Error('Proxy returned no text.')
-    return String(text)
-  }
-
-  if (mode === 'userkey') {
-    const key = userKeyRaw
-    if (!key) throw new Error('No user API key configured.')
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${encodeURIComponent(key)}`
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }),
-      signal: options.signal,
-    })
-    if (!res.ok) {
-      const body = await safeText(res)
-      throw new Error(`Gemini API error ${res.status}: ${body}`)
-    }
-    const data = await res.json()
-    const t = data?.candidates?.[0]?.content?.parts?.[0]?.text
-    if (t) return String(t)
-    if (data?.promptFeedback?.blockReason) throw new Error(`Blocked: ${data.promptFeedback.blockReason}`)
-    throw new Error('Gemini API returned no content.')
-  }
-
-  // If mode still empty but we have a proxy URL or user key, attempt without requiring mode
-  if (proxyUrlRaw) {
-    const url = proxyUrlRaw.replace(/\/$/, '') + '/generate'
-    const extId = (typeof chrome !== 'undefined' && chrome?.runtime?.id) ? chrome.runtime.id : ''
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...(proxyTokenRaw ? { 'Authorization': `Bearer ${proxyTokenRaw}` } : {}),
-        ...(extId ? { 'x-dacti-ext-id': extId } : {}),
-      },
-      body: JSON.stringify({ prompt }),
-      signal: options.signal,
-    })
-    if (!res.ok) {
-      const body = await safeText(res)
-      throw new Error(`Proxy error ${res.status}: ${body}`)
-    }
-    const data = await res.json().catch(() => ({} as any))
-    const text = data?.text ?? data?.output ?? data?.result ?? ''
-    if (!text) throw new Error('Proxy returned no text.')
-    return String(text)
-  }
-  if (userKeyRaw) {
-    const key = userKeyRaw
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${encodeURIComponent(key)}`
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }),
-      signal: options.signal,
-    })
-    if (!res.ok) {
-      const body = await safeText(res)
-      throw new Error(`Gemini API error ${res.status}: ${body}`)
-    }
-    const data = await res.json()
-    const t = data?.candidates?.[0]?.content?.parts?.[0]?.text
-    if (t) return String(t)
-    if (data?.promptFeedback?.blockReason) throw new Error(`Blocked: ${data.promptFeedback.blockReason}`)
-    throw new Error('Gemini API returned no content.')
-  }
-
-  throw new Error('Cloud mode is not configured. Provide dactiProxyUrl (or dactiProxyURL/proxyUrl/PROXY_URL) for proxy mode, or dactiUserApiKey for userkey mode; optionally set dactiCloudMode to "proxy" or "userkey".')
+  return config;
 }
 
-async function safeText(res: Response) {
-  try { return await res.text() } catch { return '' }
+async function callProxy(config: CloudConfig, prompt: string, signal?: AbortSignal): Promise<string> {
+  if (!config.proxyUrl) {
+    throw new Error('Cloud proxy URL is not configured.');
+  }
+  const url = config.proxyUrl.replace(/\/$/, '') + '/generate';
+  const extId = chrome.runtime?.id || '';
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(config.proxyToken && { 'Authorization': `Bearer ${config.proxyToken}` }),
+      ...(extId && { 'x-dacti-ext-id': extId }),
+    },
+    body: JSON.stringify({ prompt }),
+    signal,
+  });
+
+  if (!response.ok) {
+    const errorBody = await response.text().catch(() => '');
+    throw new Error(`Proxy error ${response.status}: ${errorBody}`);
+  }
+
+  const data = await response.json().catch(() => ({}));
+  const text = data?.text ?? data?.output ?? data?.result ?? '';
+  if (!text) {
+    throw new Error('Proxy returned no text.');
+  }
+  return String(text);
+}
+
+async function callUserKeyApi(config: CloudConfig, prompt: string, signal?: AbortSignal): Promise<string> {
+  if (!config.userApiKey) {
+    throw new Error('Gemini API key is not configured.');
+  }
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=${encodeURIComponent(config.userApiKey)}`;
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }),
+    signal,
+  });
+
+  if (!response.ok) {
+    const errorBody = await response.text().catch(() => '');
+    throw new Error(`Gemini API error ${response.status}: ${errorBody}`);
+  }
+
+  const data = await response.json();
+  const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+  if (text) {
+    return String(text);
+  }
+  if (data?.promptFeedback?.blockReason) {
+    throw new Error(`Request blocked by API: ${data.promptFeedback.blockReason}`);
+  }
+  throw new Error('Gemini API returned no content.');
+}
+
+export async function callGeminiApi(prompt: string, options: { signal?: AbortSignal } = {}): Promise<string> {
+  const config = await getCloudConfig();
+
+  if (!config.enabled) {
+    throw new Error('Cloud fallback is disabled in settings.');
+  }
+
+  if (config.mode === 'proxy') {
+    return callProxy(config, prompt, options.signal);
+  }
+
+  if (config.mode === 'userkey') {
+    return callUserKeyApi(config, prompt, options.signal);
+  }
+
+  throw new Error('Cloud fallback is not configured. Please set a proxy URL or a user API key in the extension settings.');
 }

@@ -5,9 +5,9 @@ export async function translateText(
   targetLang: string,
   options: { onProgress?: (p: number) => void; localOnly?: boolean; signal?: AbortSignal } = {}
 ): Promise<string> {
-  // On-device d’abord
-  // @ts-ignore
-  const canLocal = typeof ai !== 'undefined' && ai?.translator?.create
+  // First, try to use the on-device AI if available.
+  // @ts-ignore - `ai` is a global provided by Chrome's built-in AI.
+  const canLocal = typeof ai !== 'undefined' && ai?.translator?.create;
   if (canLocal) {
     try {
       // @ts-ignore

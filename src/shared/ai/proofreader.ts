@@ -5,32 +5,40 @@ export async function proofreadText(
   options: { onProgress?: (progress: number) => void; localOnly?: boolean } = {}
 ): Promise<string> {
   try {
-    // @ts-ignore
+    // First, check if the on-device AI is available.
+    // @ts-ignore - `ai` is a global provided by Chrome's built-in AI.
     if (typeof ai === 'undefined' || (await ai.canCreateTextSession()) === 'no') {
-      throw new Error("Local AI not available, falling back to cloud.");
+      throw new Error("On-device AI is not available.");
     }
 
+    // Create a proofreader instance and monitor download progress.
     // @ts-ignore
-    const pr = await ai.proofreader.create({
+    const proofreader = await ai.proofreader.create({
       model: 'gemini-nano',
-      monitor: (m: any) => {
+      monitor: (monitor: any) => {
         if (options.onProgress) {
-         m.addEventListener('downloadprogress', (e: any) => {
-  const loaded = Number(e.loaded ?? 0)
-  const total = Number(e.total ?? 1)
-  const frac = Math.min(1, loaded / Math.max(1, total))
-  options.onProgress?.(frac)
-})
+          monitor.addEventListener('downloadprogress', (e: any) => {
+            const loaded = Number(e.loaded ?? 0);
+            const total = Number(e.total ?? 1);
+            const progress = Math.min(1, loaded / Math.max(1, total));
+            options.onProgress?.(progress);
+          });
         }
       },
     });
-    return (await pr.correct({ text })).text;
-  } catch (e) {
+
+    // Correct the text using the on-device proofreader.
+    const result = await proofreader.correct({ text });
+    return result.text;
+  } catch (error) {
+    // If on-device AI fails, fall back to the cloud API, unless local-only mode is enabled.
     if (options?.localOnly) {
-      throw new Error('Local AI not available or failed, and Local‑only mode is enabled.')
+      throw new Error('On-device AI failed and local-only mode is enabled.');
     }
-    console.warn("Error with local AI, using Gemini Cloud API:", e);
-    const prompt = `Correct the grammar and spelling errors in the following text. Provide only the corrected text, without any explanation or introductory sentence.\n\nText:\n"${text}"`;
+
+    console.warn("On-device AI error, falling back to Gemini Cloud API:", error);
+
+    const prompt = `Please correct the grammar and spelling errors in the following text. Return only the corrected text, without any introductory phrases or explanations.\n\nOriginal Text:\n"${text}"`;
     return callGeminiApi(prompt);
   }
 }

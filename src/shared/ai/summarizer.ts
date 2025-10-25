@@ -54,9 +54,9 @@ export async function summarizePage(
 ): Promise<string> {
   const mode = (options.mode as SummarizeMode) || 'bullets'
 
-  // Prefer on-device Prompt API for finer control if available
-  // @ts-ignore
-  const canPromptLocal = typeof ai !== 'undefined' && ai?.prompt?.create
+  // First, attempt to use the on-device Prompt API for more control over the output style.
+  // @ts-ignore - `ai` is a global provided by Chrome's built-in AI.
+  const canPromptLocal = typeof ai !== 'undefined' && ai?.prompt?.create;
   if (canPromptLocal) {
     try {
       // @ts-ignore
@@ -69,9 +69,10 @@ export async function summarizePage(
     }
   }
 
-  // Built-in local summarizer (less controllable style-wise)
+  // If the Prompt API is unavailable, fall back to the built-in summarizer.
+  // This offers less control over the output style, so we'll do some light post-formatting.
   // @ts-ignore
-  const canSummarizerLocal = typeof ai !== 'undefined' && ai?.summarizer?.create
+  const canSummarizerLocal = typeof ai !== 'undefined' && ai?.summarizer?.create;
   if (canSummarizerLocal) {
     try {
       // @ts-ignore
