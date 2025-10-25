@@ -27,6 +27,9 @@
   function ensurePanel(): PanelRefs {
     if (refs) return refs
 
+    // Find and remove any orphaned panel from a previous script injection
+    document.getElementById('dacti-floating-panel')?.remove();
+
     const host = h('div') as HTMLDivElement
     host.id = 'dacti-floating-panel'
     Object.assign(host.style, {
