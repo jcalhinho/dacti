@@ -1,5 +1,11 @@
 import { callGeminiApi } from './gemini-api'
 
+function stripFences(s: string): string {
+  if (!s) return s
+  const m = s.match(/```(?:json)?\s*([\s\S]*?)```/i)
+  return (m ? m[1] : s).trim()
+}
+
 export type Caption = { alt: string; tags: string[] }
 
 export async function captionImage(
@@ -21,7 +27,7 @@ export async function captionImage(
       })
       const txt = String(res ?? '')
       try {
-        const parsed = JSON.parse(txt)
+        const parsed = JSON.parse(stripFences(txt))
         if (parsed?.alt && Array.isArray(parsed?.tags)) return parsed as Caption
       } catch {}
       // Si le modèle renvoie du texte brut : meilleure effort
@@ -41,13 +47,36 @@ export async function captionImage(
       'Rules: Alt <=120 chars, objective, no assumptions. Tags are lowercase single words.'
     ].join(' ')
 
+    try {
+      // Try proxy multimodal first
+      // @ts-ignore
+      const { dactiProxyUrl, dactiProxyToken } = await chrome.storage.local.get(['dactiProxyUrl','dactiProxyToken'])
+      const proxy = String(dactiProxyUrl || '').replace(/\/$/, '')
+      if (proxy) {
+        const r = await fetch(`${proxy}/generate-multi`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...(dactiProxyToken ? { Authorization: `Bearer ${dactiProxyToken}` } : {}) },
+          body: JSON.stringify({ prompt, imageBase64: base64, mimeType: (blob as any)?.type || 'image/png' }),
+        })
+        if (r.ok) {
+          const { text } = await r.json() as any
+          const cleaned = stripFences(String(text || ''))
+          try { const parsed = JSON.parse(cleaned); if (parsed?.alt && Array.isArray(parsed?.tags)) return parsed as Caption } catch {}
+          return { alt: cleaned.slice(0,120), tags: [] }
+        }
+      }
+    } catch {}
+
+    // Fallback legacy (text-only) – may be weak, but keeps behavior if no proxy configured
     const json = await callGeminiApi(`${prompt}\n\nIMAGE_BASE64:\n${base64}`)
     try {
-      const parsed = JSON.parse(json)
+      const parsed = JSON.parse(stripFences(json))
       if (parsed?.alt && Array.isArray(parsed?.tags)) return parsed as Caption
-      return { alt: String(json).slice(0, 120), tags: [] }
+      const cleaned = stripFences(json)
+      return { alt: cleaned.slice(0, 120), tags: [] }
     } catch {
-      return { alt: String(json).slice(0, 120), tags: [] }
+      const cleaned = stripFences(json)
+      return { alt: cleaned.slice(0, 120), tags: [] }
     }
   }
 

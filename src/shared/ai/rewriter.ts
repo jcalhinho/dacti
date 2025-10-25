@@ -3,7 +3,7 @@ import { callGeminiApi } from './gemini-api'
 export async function rewriteText(
   text: string,
   cfg: { style: string },
-  options: { onProgress?: (p: number) => void; localOnly?: boolean } = {}
+  options: { onProgress?: (p: number) => void; localOnly?: boolean; signal?: AbortSignal } = {}
 ): Promise<string> {
   // On-device d’abord
   // @ts-ignore
@@ -23,10 +23,16 @@ export async function rewriteText(
     throw new Error('Local-only mode is enabled; cloud rewrite is disabled.')
   }
 
-  const prompt = `Rewrite the following text. Style: ${cfg.style}.
-Return only the rewritten text, no explanations.
+   const prompt = `You are a precise rewriter. Rewrite the text in the requested style while preserving meaning and factual content.
+Rules:
+- Do not add facts.
+- No meta commentary.
+- Keep URLs, numbers and entities.
+- Output only the rewritten text.
+
+Style: ${cfg.style}
 
 TEXT:
 ${text}`
-  return callGeminiApi(prompt)
+  return callGeminiApi(prompt, { signal: options?.signal })
 }

@@ -3,7 +3,7 @@ import { callGeminiApi } from './gemini-api'
 export async function translateText(
   text: string,
   targetLang: string,
-  options: { onProgress?: (p: number) => void; localOnly?: boolean } = {}
+  options: { onProgress?: (p: number) => void; localOnly?: boolean; signal?: AbortSignal } = {}
 ): Promise<string> {
   // On-device d’abord
   // @ts-ignore
@@ -12,7 +12,7 @@ export async function translateText(
     try {
       // @ts-ignore
       const tr = await ai.translator.create({ model: 'gemini-nano' })
-      const out = await tr.translate({ text, targetLanguage: targetLang })
+     const out = await tr.translate({ text, targetLanguage: (targetLang && targetLang !== 'auto') ? targetLang : 'en' })
       return String(out?.text ?? out ?? '')
     } catch (e) {
       if (options?.localOnly) throw e
@@ -23,10 +23,16 @@ export async function translateText(
     throw new Error('Local-only mode is enabled; cloud translation is disabled.')
   }
 
-  const prompt = `Translate the following text into ${targetLang}.
-Return only the translated text without quotes or explanation.
+   const target = String(targetLang || 'en')
+  const detect = target.toLowerCase() === 'auto'
+  const prompt = detect
+    ? `Detect the source language and translate into English. Return **only** the translation (no quotes, no preface). Preserve numbers and capitalization.
 
 TEXT:
 ${text}`
-  return callGeminiApi(prompt)
+    : `Translate the following text into ${target}. Return **only** the translation (no quotes, no preface). Preserve numbers and capitalization.
+
+TEXT:
+${text}`
+  return callGeminiApi(prompt, { signal: options?.signal })
 }

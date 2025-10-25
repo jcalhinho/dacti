@@ -3,7 +3,7 @@ import { callGeminiApi } from './gemini-api'
 export async function writeFromContext(
   context: string,
   task: { task: string },
-  options: { onProgress?: (p: number) => void; localOnly?: boolean } = {}
+  options: { onProgress?: (p: number) => void; localOnly?: boolean; signal?: AbortSignal } = {}
 ): Promise<string> {
   // On-device d’abord
   // @ts-ignore
@@ -23,9 +23,17 @@ export async function writeFromContext(
     throw new Error('Local-only mode is enabled; cloud write is disabled.')
   }
 
-  const prompt = `${task.task}
+  const prompt = `Write according to the instruction.
+Rules:
+- Be concise and concrete.
+- No boilerplate like "Here is".
+- Keep entities and numbers from the context.
+- Output only the final text.
+
+Instruction:
+${task.task}
 
 Context:
 ${context}`
-  return callGeminiApi(prompt)
+  return callGeminiApi(prompt, { signal: options?.signal })
 }
