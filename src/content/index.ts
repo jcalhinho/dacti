@@ -62,7 +62,8 @@
       .wrap[data-theme="dark"] .close { color:#e5e7eb; }
       .controls { padding:10px 12px; border-bottom:1px solid var(--border); display:flex; align-items:center; justify-content:space-between; gap:8px; flex-wrap: wrap; }
      .grid { display:grid; grid-template-columns: repeat(2, minmax(0,1fr)); align-items:stretch; gap:12px; padding:10px 12px; }
-.btn { appearance:none; border:1px solid var(--btn-border); background:var(--btn-bg); border-radius:8px; padding:12px; font-size:12px; color:var(--text); cursor:pointer; display:flex; align-items:center; justify-content:center; gap:6px; transition: box-shadow .2s ease, border-color .2s ease, transform .06s ease; min-height:44px; width:100%; }.btn:hover { box-shadow: var(--btn-hover-shadow); border-color: color-mix(in srgb, var(--accent) 40%, var(--btn-border)); }
+      .btn { appearance:none; border:1px solid var(--btn-border); background:var(--btn-bg); border-radius:8px; padding:12px; font-size:12px; color:var(--text); cursor:pointer; display:flex; align-items:center; justify-content:center; gap:6px; transition: box-shadow .2s ease, border-color .2s ease, transform .06s ease; min-height:44px; width:100%; }
+      .btn:hover { box-shadow: var(--btn-hover-shadow); border-color: color-mix(in srgb, var(--accent) 40%, var(--btn-border)); }
       .btn:active { transform: translateY(1px); }
       .btn:disabled { opacity:.6; cursor:default; box-shadow:none; }
       .out { flex:1 1 auto; margin:12px; margin-top:0; border:1px solid var(--border); border-radius:12px; background:var(--card); padding:10px; overflow:auto; white-space:pre-wrap; min-height:60px; font-size:12px; }
@@ -205,7 +206,7 @@ header.appendChild(closeBtn)
     const grid = h('div', 'grid')
 
     // --- Dropdown factory
-    function makeDropdown(label: string, items: {label:string, value:'summarize'|'translate'|'write', payload?:any}[]) {
+    function makeDropdown(label: string, items: {label:string, value:'summarize'|'translate'|'write'|'proofread'|'rewrite', payload?:any}[]) {
       const wrap = h('div') as HTMLDivElement
       const btn = h('button', 'btn', label + ' ▾') as HTMLButtonElement
       const menu = h('div') as HTMLDivElement
@@ -262,12 +263,18 @@ wrap.appendChild(btn); wrap.appendChild(menu)
       { label:'Conventional commit', value:'write', payload:{ writeType:'commit' } },
     ])
 
-    const btnAlt = h('button', 'btn', 'Alt Images') as HTMLButtonElement
+    const editDD = makeDropdown('Edit', [
+      { label:'Proofread selection', value:'proofread', payload:{} },
+      { label:'Rewrite: Shorter', value:'rewrite', payload:{ rewriteStyle:'shorter' } },
+      { label:'Rewrite: Professional', value:'rewrite', payload:{ rewriteStyle:'professional' } },
+      { label:'Rewrite: Casual', value:'rewrite', payload:{ rewriteStyle:'casual' } },
+      { label:'Rewrite: More detailed', value:'rewrite', payload:{ rewriteStyle:'detailed' } },
+    ])
 
     grid.appendChild(summarizeDD.wrap)
     grid.appendChild(translateDD.wrap)
-    grid.appendChild(btnAlt)
     grid.appendChild(writeDD.wrap)
+    grid.appendChild(editDD.wrap)
 
     const progressWrap = h('div','progressWrap') as HTMLDivElement
     const progressBar = h('div','progressBar') as HTMLDivElement
@@ -386,8 +393,8 @@ wrap.appendChild(btn); wrap.appendChild(menu)
       applyTheme(mode)
     })
 
-    const run = async (action: 'summarize' | 'translate' | 'altimages' | 'write', params?: any) => {
-      outEl.textContent = action === 'summarize' ? '⏳ Summarizing…' : action === 'translate' ? '⏳ Translating…' : action === 'altimages' ? '🔎 Scanning images…' : '⏳ Writing…'
+    const run = async (action: 'summarize' | 'translate' | 'altimages' | 'write' | 'proofread' | 'rewrite', params?: any) => {
+      outEl.textContent = '⏳ Thinking…'
       await detectLocalAvailability()
       const localOnly = effectiveLocal()
       setBadge(localOnly)
@@ -407,11 +414,9 @@ wrap.appendChild(btn); wrap.appendChild(menu)
     }
 
     function disable(v: boolean) {
-      (summarizeDD.btn.disabled = v), (translateDD.btn.disabled = v), (writeDD.btn.disabled = v)
-      btnAlt.disabled = v
+      (summarizeDD.btn.disabled = v), (translateDD.btn.disabled = v), (writeDD.btn.disabled = v), (editDD.btn.disabled = v)
     }
 
-    btnAlt.addEventListener('click', () => run('altimages'))
     copyBtn.addEventListener('click', async () => {
       try { await navigator.clipboard.writeText(outEl.textContent || '') } catch {}
     })

@@ -28,6 +28,7 @@ import { translateText } from '@/shared/ai/translator'
 import { summarizePage } from '@/shared/ai/summarizer'
 import { proofreadText } from '@/shared/ai/proofreader'
 import { writeFromContext } from '@/shared/ai/writer'
+import { captionImage } from '@/shared/ai/promptMultimodal'
 
 // -----------------------------
 // Helpers to drive the in-page React panel (content script)
@@ -96,6 +97,7 @@ chrome.runtime.onInstalled.addListener(() => {
     chrome.contextMenus.create({ id: 'dacti-translate', title: 'DACTI • Translate selection', contexts: ['selection'] })
     chrome.contextMenus.create({ id: 'dacti-rewrite',   title: 'DACTI • Rewrite…',            contexts: ['selection'] })
     chrome.contextMenus.create({ id: 'dacti-summarize', title: 'DACTI • Summarize selection', contexts: ['selection'] })
+    chrome.contextMenus.create({ id: 'dacti-caption',   title: 'DACTI • Describe image with AI', contexts: ['image'] })
   })
 })
 
@@ -106,6 +108,15 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
     const t = startTask(tab?.id || -1)
     const signal = t.abort.signal
     stopToggle(tab?.id, true)
+
+    if (info.menuItemId === 'dacti-caption' && info.srcUrl) {
+      await openPanel(tab?.id, { title: 'DACTI • Image Description', message: '⏳ Analyzing image…' })
+      const blob = await fetch(info.srcUrl, { mode: 'cors' }).then(r => r.blob())
+      const caption = await captionImage(blob, { localOnly })
+      const message = `Description:\n${caption.alt}\n\nTags:\n${caption.tags.join(', ')}`
+      if (getTask(tab?.id || -1)?.canceled) return
+      return updatePanel(tab?.id, { message })
+    }
 
     if (info.menuItemId === 'dacti-translate' && info.selectionText) {
       await openPanel(tab?.id, { title: 'DACTI • Translation', message: '⏳ Translating…' })
@@ -211,8 +222,18 @@ chrome.runtime.onMessage.addListener(async (msg, sender) => {
         return updatePanel(tabId, { message: String(out).slice(0,5000) })
       }
 
+      if (msg.action === 'proofread') {
+        await openPanel(tabId, { title: 'DACTI • Proofread', message: '⏳ Proofreading…' })
+        const sel: string = (await chrome.scripting.executeScript({ target: { tabId }, func: () => window.getSelection()?.toString() || '' }))[0].result
+        if (!sel) return updatePanel(tabId, { message: 'Empty selection.' })
+        const input = (!localOnly && dactiMaskPII) ? maskPII(sel) : sel
+        const out = await proofreadText(input, { localOnly, onProgress: (p) => progress(tabId, p) })
+        if (getTask(tabId)?.canceled) { stopToggle(tabId, false); return }
+        return updatePanel(tabId, { message: String(out).slice(0,5000) })
+      }
+
       if (msg.action === 'rewrite') {
-        const style = String(params?.style || 'simplify')
+        const style = String(params?.rewriteStyle || 'professional')
         await openPanel(tabId, { title: 'DACTI • Rewrite', message: '⏳ Rewriting…' })
         const fromPanel = params?.source === 'panel' && typeof params?.text === 'string'
         const sel: string = fromPanel

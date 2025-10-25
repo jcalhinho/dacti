@@ -11,28 +11,39 @@ export async function rewriteText(
   if (canLocal) {
     try {
       // @ts-ignore
-      const rw = await ai.rewriter.create({ model: 'gemini-nano' })
-      const out = await rw.rewrite({ text, tone: cfg.style })
-      return String(out?.text ?? out ?? '')
+      const rewriter = await ai.rewriter.create({ model: 'gemini-nano' });
+      const result = await rewriter.rewrite({ text, tone: cfg.style });
+      return String(result?.text ?? result ?? '');
     } catch (e) {
-      if (options?.localOnly) throw e
+      if (options?.localOnly) throw e;
     }
   }
 
   if (options?.localOnly) {
-    throw new Error('Local-only mode is enabled; cloud rewrite is disabled.')
+    throw new Error('On-device AI is not available and local-only mode is enabled.');
   }
 
-   const prompt = `You are a precise rewriter. Rewrite the text in the requested style while preserving meaning and factual content.
-Rules:
-- Do not add facts.
-- No meta commentary.
-- Keep URLs, numbers and entities.
-- Output only the rewritten text.
+  const styleInstructions: Record<string, string> = {
+    shorter: 'Make the text more concise and to the point. Remove any unnecessary words or phrases.',
+    professional: 'Rewrite the text in a formal and professional tone. Use clear, direct language suitable for a business context.',
+    casual: 'Rewrite the text in a more relaxed and conversational tone. Use contractions and simpler language.',
+    detailed: 'Expand on the original text, adding more detail and explanation where appropriate. Elaborate on the key points.',
+  };
 
-Style: ${cfg.style}
+  const instruction = styleInstructions[cfg.style] || 'Rewrite the text, improving its clarity and flow.';
 
-TEXT:
-${text}`
-  return callGeminiApi(prompt, { signal: options?.signal })
+  const prompt = `You are a precise rewriter. Your task is to rewrite the given text based on the specified style, while preserving the original meaning and factual content.
+
+Follow these rules strictly:
+- Do not introduce new facts or information.
+- Avoid meta-commentary (e.g., "Here is the rewritten text:").
+- Preserve essential entities like URLs, numbers, and names.
+- Your output must be only the rewritten text.
+
+Style Instruction: ${instruction}
+
+Original Text:
+${text}`;
+
+  return callGeminiApi(prompt, { signal: options?.signal });
 }
