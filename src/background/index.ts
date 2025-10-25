@@ -1,3 +1,4 @@
+const CANCELED_MSG = '⛔️ Request canceled by user.'
 // --- Task management for cancellation ---
 const tasks = new Map<number, { abort: AbortController, canceled: boolean, jobId: number }>()
 let seq = 0
@@ -17,7 +18,7 @@ chrome.runtime.onMessage.addListener((msg, sender) => {
     const tabId = sender?.tab?.id
     if (tabId) {
       cancelTask(tabId)
-      updatePanel(tabId, { message: '⏹️ stopped by user.' })
+      updatePanel(tabId, { message: CANCELED_MSG })
       progress(tabId, 1)
     }
   }
@@ -53,6 +54,10 @@ function progress(tabId: number | undefined, value: number) {
 function stopToggle(tabId: number | undefined, show: boolean) {
   if (!tabId) return
   return chrome.tabs.sendMessage(tabId, { type: show ? 'DACTI_STOP_SHOW' : 'DACTI_STOP_HIDE' })
+}
+function loading(tabId: number | undefined, show: boolean) {
+  if (!tabId) return
+  return chrome.tabs.sendMessage(tabId, { type: 'DACTI_LOADING', show })
 }
 function pathLabel(localOnly: boolean, cached = false) {
   const base = localOnly ? '🧠 Local (on-device)' : '☁️ Cloud'
@@ -108,7 +113,8 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
     stopToggle(tab?.id, true)
 
     if (info.menuItemId === 'dacti-translate' && info.selectionText) {
-      await openPanel(tab?.id, { title: 'DACTI • Translation', message: '⏳ Translating…' })
+      await openPanel(tab?.id, { title: 'DACTI', message: '' })
+      loading(tab?.id, true)
       const key = 'tr:' + hash(info.selectionText + '|en' + Number(localOnly))
       const cached = await cacheGet(key)
       if (cached) return updatePanel(tab?.id, { message: String(cached).slice(0,5000) })
@@ -120,7 +126,8 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
     }
 
     if (info.menuItemId === 'dacti-rewrite' && info.selectionText) {
-      await openPanel(tab?.id, { title: 'DACTI • Rewrite', message: '⏳ Rewriting…' })
+      await openPanel(tab?.id, { title: 'DACTI', message: '' })
+      loading(tab?.id, true)
       const key = 'rw:' + hash(info.selectionText + '|simplify' + Number(localOnly))
       const cached = await cacheGet(key)
       if (cached) return updatePanel(tab?.id, { message: String(cached).slice(0,5000) })
@@ -132,7 +139,8 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
     }
 
     if (info.menuItemId === 'dacti-summarize' && info.selectionText) {
-      await openPanel(tab?.id, { title: 'DACTI • Summary', message: '⏳ Summarizing…' })
+      await openPanel(tab?.id, { title: 'DACTI', message: '' })
+      loading(tab?.id, true)
       const key = 'sm:' + hash(info.selectionText + Number(localOnly))
       const cached = await cacheGet(key)
       if (cached) return updatePanel(tab?.id, { message: String(cached).slice(0,5000) })
@@ -143,8 +151,9 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
       return updatePanel(tab?.id, { message: String(out).slice(0,5000) })
     }
   } catch (e: any) {
-    await updatePanel(tab?.id, { title: 'DACTI • Error', message: e?.message ? String(e.message) : String(e) })
+    await updatePanel(tab?.id, { title: 'DACTI', message: e?.message ? String(e.message) : String(e) })
   } finally {
+    loading(tab?.id, false)
     stopToggle(tab?.id, false)
   }
 })
@@ -194,7 +203,8 @@ chrome.runtime.onMessage.addListener(async (msg, sender) => {
       const params = msg.params || {}
       stopToggle(tabId, true)
       if (msg.action === 'translate') {
-        await openPanel(tabId, { title: 'DACTI • Translate', message: '⏳ Translating…' })
+        await openPanel(tabId, { title: 'DACTI', message: '' })
+        loading(tabId, true)
         const fromPanel = params?.source === 'panel' && typeof params?.text === 'string'
         const sel: string = fromPanel
           ? String(params.text)
@@ -213,7 +223,8 @@ chrome.runtime.onMessage.addListener(async (msg, sender) => {
 
       if (msg.action === 'rewrite') {
         const style = String(params?.style || 'simplify')
-        await openPanel(tabId, { title: 'DACTI • Rewrite', message: '⏳ Rewriting…' })
+        await openPanel(tabId, { title: 'DACTI', message: '' })
+        loading(tabId, true)
         const fromPanel = params?.source === 'panel' && typeof params?.text === 'string'
         const sel: string = fromPanel
           ? String(params.text)
@@ -230,7 +241,8 @@ chrome.runtime.onMessage.addListener(async (msg, sender) => {
       }
 
       if (msg.action === 'summarize') {
-        await openPanel(tabId, { title: 'DACTI • Summarize', message: '⏳ Summarizing…' })
+        await openPanel(tabId, { title: 'DACTI', message: '' })
+        loading(tabId, true)
         const fromPanel = params?.source === 'panel' && typeof params?.text === 'string'
         let input: string
         if (fromPanel) {
@@ -251,7 +263,8 @@ chrome.runtime.onMessage.addListener(async (msg, sender) => {
       }
 
       if (msg.action === 'altimages') {
-        await openPanel(tabId, { title: 'DACTI • Alt Images', message: '🔎 Scanning images…' })
+        await openPanel(tabId, { title: 'DACTI', message: '' })
+        loading(tabId, true)
         const [{ result: urls }] = await chrome.scripting.executeScript({
           target: { tabId },
           func: () => Array.from(document.images).map(im => im.currentSrc || im.src).filter(Boolean)
@@ -329,7 +342,8 @@ chrome.runtime.onMessage.addListener(async (msg, sender) => {
       }
 
       if (msg.action === 'write') {
-        await openPanel(tabId, { title: 'DACTI • Write', message: '⏳ Writing…' })
+        await openPanel(tabId, { title: 'DACTI • Write', message: '' })
+        loading(tabId, true)
         let ctx: string
         if (params?.source === 'panel' && typeof params?.text === 'string') {
           ctx = String(params.text)
@@ -356,8 +370,10 @@ chrome.runtime.onMessage.addListener(async (msg, sender) => {
       }
     }
   } catch (e: any) {
-    return updatePanel(tabId, { title: 'DACTI • Error', message: e?.message ? String(e.message) : String(e) })
+    const canceled = !!getTask(tabId)?.canceled || String(e?.name||'').toLowerCase() === 'aborterror'
+    return updatePanel(tabId, { title: 'DACTI • Error', message: canceled ? CANCELED_MSG : (e?.message ? String(e.message) : String(e)) })
   } finally {
+    loading(tabId, false)
     stopToggle(tabId, false)
   }
 })

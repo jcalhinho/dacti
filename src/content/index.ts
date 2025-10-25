@@ -14,6 +14,8 @@
   } | null
 
   let refs: PanelRefs = null
+  const DBG = true
+  let panelAPI: { startLoading: () => void; stopLoading: () => void } | null = null
 
   const stripFences = (s: string) => { const m = String(s||'').match(/```(?:json)?\s*([\s\S]*?)```/i); return (m?m[1]:String(s||'')).trim() }
 
@@ -62,13 +64,19 @@
       .wrap[data-theme="dark"] .close { color:#e5e7eb; }
       .controls { padding:10px 12px; border-bottom:1px solid var(--border); display:flex; align-items:center; justify-content:space-between; gap:8px; flex-wrap: wrap; }
      .grid { display:grid; grid-template-columns: repeat(2, minmax(0,1fr)); align-items:stretch; gap:12px; padding:10px 12px; }
-.btn { appearance:none; border:1px solid var(--btn-border); background:var(--btn-bg); border-radius:8px; padding:12px; font-size:12px; color:var(--text); cursor:pointer; display:flex; align-items:center; justify-content:center; gap:6px; transition: box-shadow .2s ease, border-color .2s ease, transform .06s ease; min-height:44px; width:100%; }.btn:hover { box-shadow: var(--btn-hover-shadow); border-color: color-mix(in srgb, var(--accent) 40%, var(--btn-border)); }
+.btn { appearance:none; border:1px solid var(--btn-border); background:var(--btn-bg); border-radius:8px; padding:12px; font-size:14px; font-weight:600; color:var(--text); cursor:pointer; display:flex; align-items:center; justify-content:center; gap:6px; transition: box-shadow .2s ease, border-color .2s ease, transform .06s ease; min-height:44px; width:100%; }
+.btn:hover { box-shadow: var(--btn-hover-shadow); border-color: color-mix(in srgb, var(--accent) 40%, var(--btn-border)); }.btn.active{
+  background: color-mix(in srgb, var(--accent) 12%, var(--btn-bg));
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--btn-border));
+}
       .btn:active { transform: translateY(1px); }
       .btn:disabled { opacity:.6; cursor:default; box-shadow:none; }
       .out { flex:1 1 auto; margin:12px; margin-top:0; border:1px solid var(--border); border-radius:12px; background:var(--card); padding:10px; overflow:auto; white-space:pre-wrap; min-height:60px; font-size:12px; }
       .toolbar { display:flex; gap:8px; padding:8px 12px; border-top:1px solid var(--border); background:var(--subtle); border-bottom-left-radius:20px; border-bottom-right-radius:20px; }
       .small { font-size:12px; display:flex; align-items:center; gap:6px; color:var(--muted); }
       .badge { font-size:11px; padding:2px 6px; border:1px solid var(--badge-border); border-radius:999px; color:var(--accent); background: var(--badge-bg); }
+      .header .badge{ margin-left:auto; }
+      .loaderImg{ width:12px; height:12px; display:inline-block; object-fit:contain; margin-right:6px; border-radius:2px; }
       .themeSelect { appearance: none; border:1px solid var(--border); background: var(--btn-bg); color: var(--text); padding: 6px 8px; border-radius: 8px; font-size: 12px; }
       /* Material-like, compact toggle */
       .toggleRow{ display:flex; align-items:center; gap:8px; }
@@ -97,6 +105,8 @@
       .altmeta .altline{ line-height:1.35; }
       .alttagsScroll{ max-height:64px; overflow-y:auto; padding-right:4px; }
       .spin{ display:inline-block; width:12px; height:12px; border:2px solid currentColor; border-right-color:transparent; border-radius:50%; animation:sp .6s linear infinite; margin-right:6px }
+      .loadingAnim{ display:flex; align-items:center; justify-content:center; min-height:44px; }
+    .loadingAnim img{ width:40px; height:40px; image-rendering:auto; }
       @keyframes sp{ to{ transform:rotate(360deg) } }
       .fadeIn{ animation: fadeIn .16s ease-out; }
       @keyframes fadeIn{ from{ opacity:0; transform: translateY(2px) } to{ opacity:1; transform:none } }
@@ -136,7 +146,18 @@ closeBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="14" height=
 closeBtn.addEventListener('click', () => { host.remove(); refs = null })
 
 header.appendChild(titleEl)
-header.appendChild(closeBtn)
+// Test probe image to verify chrome-extension:// images load in header
+const testImg = new Image()
+testImg.src = chrome.runtime.getURL('one.webp')
+testImg.alt = 'dacti_loader'
+testImg.width = 40
+testImg.height = 40
+
+
+testImg.style.objectFit = 'contain'
+header.appendChild(testImg)
+let headerLoaderImg: HTMLImageElement | null = testImg
+// (badge will be appended here later, before the close button)
 
     const controls = h('div', 'controls')
 
@@ -184,7 +205,14 @@ header.appendChild(closeBtn)
 
     // Stop shown only while running (next to Theme)
     const stopBtn = h('button', 'btn stop') as HTMLButtonElement
+    // Default spinner; will be replaced by a custom image if configured
     stopBtn.innerHTML = '<span class="spin" aria-hidden="true"></span>Stop'
+    chrome.storage.local.get('dactiLoaderImage').then(({ dactiLoaderImage }) => {
+      const url = (typeof dactiLoaderImage === 'string' ? dactiLoaderImage.trim() : '')
+      if (url) {
+        stopBtn.innerHTML = `<img class="loaderImg" src="${url}" alt=""/>Stop`
+      }
+    })
     stopBtn.style.display = 'none'
     stopBtn.addEventListener('click', async () => {
       stopBtn.disabled = true
@@ -197,12 +225,16 @@ header.appendChild(closeBtn)
       const baseTip = isLocal ? 'Local mode (on-device Gemini Nano).' : 'Cloud mode (proxy/API).'
       badge.title = [baseTip, tipExtra].filter(Boolean).join(' ')
     }
-    controls.appendChild(modeWrap)
-    controls.appendChild(badge)
-    controls.appendChild(themeWrap)
-    controls.appendChild(stopBtn)
+    // Move the blue Cloud/Local badge into the header (to the right of the title)
+    header.appendChild(badge)
+    header.appendChild(closeBtn)
 
-    const grid = h('div', 'grid')
+  controls.appendChild(modeWrap)
+controls.appendChild(themeWrap)
+
+const grid = h('div', 'grid')
+
+
 
     // --- Dropdown factory
     function makeDropdown(label: string, items: {label:string, value:'summarize'|'translate'|'write', payload?:any}[]) {
@@ -216,10 +248,11 @@ header.appendChild(closeBtn)
         Object.assign(mi.style, { padding:'8px 10px', borderRadius:'6px', cursor:'pointer', fontSize:'12px' })
         mi.addEventListener('mouseenter', () => mi.style.background = 'color-mix(in srgb, var(--accent), var(--btn-bg) 85%)')
         mi.addEventListener('mouseleave', () => mi.style.background = 'transparent')
-        mi.addEventListener('click', () => {
-          menu.style.display = 'none'
-          run(it.value, it.payload)
-        })
+       mi.addEventListener('click', () => {
+  menu.style.display = 'none'
+  setActive(it.value as any)
+  run(it.value, it.payload)
+})
         menu.appendChild(mi)
       })
    wrap.style.position = 'relative'
@@ -275,12 +308,102 @@ wrap.appendChild(btn); wrap.appendChild(menu)
 
     const outEl = h('div', 'out') as HTMLDivElement
 
+    // --- Loading animation (cycles one,two,three,four.webp from /public, robustly resolving URLs and bypassing CSP)
+    const cacheBust = (u: string) => u + (u.includes('?') ? '&' : '?') + 't=' + Date.now()
+    let headerTimer: number | null = null
+    let panelTimer: number | null = null
+    function startLoading() {
+      if (DBG) console.log('[DACTI] startLoading()')
+      try { stopLoading() } catch {}
+
+      // Two distinct sequences: header uses one/two, panel uses three/four
+      const headerRaw = ['one.webp','two.webp']
+      const panelRaw  = ['three.webp','four.webp']
+      const headerUrls = headerRaw.map((p) => chrome.runtime.getURL(p))
+      const panelUrls  = panelRaw.map((p) => chrome.runtime.getURL(p))
+      if (DBG) console.log('[DACTI] header frames:', headerUrls, 'panel frames:', panelUrls)
+
+      // Fallback: convert to data: URL only if extension URL fails
+      const toDataUrl = async (extUrl: string) => {
+        try {
+          const resp = await fetch(extUrl)
+          const blob = await resp.blob()
+          return await new Promise<string>((resolve, reject) => {
+            const fr = new FileReader(); fr.onload = () => resolve(String(fr.result)); fr.onerror = reject; fr.readAsDataURL(blob)
+          })
+        } catch { return extUrl }
+      }
+
+      let hi = 0, pi = 0
+      const img = new Image()
+      img.alt = ''
+      img.referrerPolicy = 'no-referrer'
+
+      // if the current source fails (e.g., CSP blocks), try switching that frame to a data: URL once (for PANEL image)
+      const triedDataPanel: Record<number, boolean> = {}
+      img.onerror = async () => {
+        if (!triedDataPanel[pi]) {
+          triedDataPanel[pi] = true
+          const dataUrl = await toDataUrl(panelUrls[pi])
+          if (DBG) console.warn('[DACTI] panel img error, switching to data: for', panelUrls[pi])
+          img.src = dataUrl
+        }
+      }
+
+      // Initial frames
+      img.src = cacheBust(panelUrls[0])
+      if (headerLoaderImg) headerLoaderImg.src = cacheBust(headerUrls[0])
+      if (DBG) console.log('[DACTI] first frames set → header:', headerUrls[0], 'panel:', panelUrls[0])
+
+      const wrap = document.createElement('div'); wrap.className = 'loadingAnim'; wrap.appendChild(img)
+      outEl.innerHTML = ''
+      outEl.appendChild(wrap)
+
+      // Separate timers for header and panel animations
+      const headerDurations = [400, 200, 200, 600, 400]
+      let headerStep = 0
+
+      const advanceHeader = () => {
+        hi = (hi + 1) % headerUrls.length
+        const nextHeader = headerUrls[hi]
+        if (headerLoaderImg) headerLoaderImg.src = cacheBust(nextHeader)
+        const nextDelay = headerDurations[headerStep % headerDurations.length]
+        headerStep++
+        headerTimer = window.setTimeout(advanceHeader, nextDelay)
+      }
+
+      const advancePanel = () => {
+        pi = (pi + 1) % panelUrls.length
+        triedDataPanel[pi] = false
+        const nextPanel = panelUrls[pi]
+        img.src = cacheBust(nextPanel)
+        panelTimer = window.setTimeout(advancePanel, 300)
+      }
+
+      // Start independent timers
+      headerTimer = window.setTimeout(advanceHeader, 200)
+      panelTimer = window.setTimeout(advancePanel, 300)
+    }
+    function stopLoading() {
+      if (DBG) console.log('[DACTI] stopLoading()')
+      if (headerTimer) { clearTimeout(headerTimer); headerTimer = null }
+      if (panelTimer)  { clearTimeout(panelTimer);  panelTimer = null }
+      if (headerLoaderImg) headerLoaderImg.src = chrome.runtime.getURL('one.webp')
+    }
+      // expose loading controls to outer listeners
+      panelAPI = { startLoading, stopLoading }
+
   
 
     wrap.appendChild(header)
     wrap.appendChild(controls)
     wrap.appendChild(grid)
+    stopBtn.style.width = 'calc(100% - 24px)'
+stopBtn.style.margin = '8px 12px'
+wrap.appendChild(stopBtn)
     wrap.appendChild(progressWrap)
+    // Place Stop button between grid and progress bar
+
     wrap.appendChild(outEl)
     wrap.appendChild(toolbar)
 
@@ -385,9 +508,16 @@ wrap.appendChild(btn); wrap.appendChild(menu)
       chrome.storage.local.set({ dactiTheme: mode })
       applyTheme(mode)
     })
-
+function setActive(kind: 'summarize' | 'translate' | 'altimages' | 'write') {
+  summarizeDD.btn.classList.toggle('active', kind === 'summarize')
+  translateDD.btn.classList.toggle('active', kind === 'translate')
+  btnAlt.classList.toggle('active', kind === 'altimages')
+  writeDD.btn.classList.toggle('active', kind === 'write')
+}
     const run = async (action: 'summarize' | 'translate' | 'altimages' | 'write', params?: any) => {
-      outEl.textContent = action === 'summarize' ? '⏳ Summarizing…' : action === 'translate' ? '⏳ Translating…' : action === 'altimages' ? '🔎 Scanning images…' : '⏳ Writing…'
+      if (DBG) console.log('[DACTI] run()', action, params)
+        setActive(action)
+      startLoading()
       await detectLocalAvailability()
       const localOnly = effectiveLocal()
       setBadge(localOnly)
@@ -397,9 +527,9 @@ wrap.appendChild(btn); wrap.appendChild(menu)
       try {
         await chrome.runtime.sendMessage({ type: 'DACTI_ACTION', action, localOnly, params })
       } finally {
+        stopLoading()
         ;(stopBtn as HTMLButtonElement).disabled = true
         stopBtn.style.display = 'none'
-        
         modeInput.disabled = !localAvailable && userMode !== 'cloud'
         switchEl.classList.toggle('disabled', modeInput.disabled)
         disable(false)
@@ -411,7 +541,7 @@ wrap.appendChild(btn); wrap.appendChild(menu)
       btnAlt.disabled = v
     }
 
-    btnAlt.addEventListener('click', () => run('altimages'))
+btnAlt.addEventListener('click', () => { setActive('altimages'); run('altimages') })
     copyBtn.addEventListener('click', async () => {
       try { await navigator.clipboard.writeText(outEl.textContent || '') } catch {}
     })
@@ -451,6 +581,12 @@ wrap.appendChild(btn); wrap.appendChild(menu)
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (!msg || typeof msg !== 'object') return
 
+  if (msg.type === 'DACTI_LOADING') {
+    if (DBG) console.log('[DACTI] DACTI_LOADING show=', msg.show)
+    ensurePanel()!
+    if (msg.show) panelAPI?.startLoading(); else panelAPI?.stopLoading()
+    return
+  }
   // --- ASYNC HANDLERS (must return true) ---
   if (msg.type === 'DACTI_CAPTION_LOCAL') {
     (async () => {
