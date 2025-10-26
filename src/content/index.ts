@@ -313,7 +313,7 @@ wrap.appendChild(btn); wrap.appendChild(menu)
     let headerTimer: number | null = null
     let panelTimer: number | null = null
     function startLoading() {
-      if (DBG) console.log('[DACTI] startLoading()')
+      
       try { stopLoading() } catch {}
 
       // Two distinct sequences: header uses one/two, panel uses three/four
@@ -321,7 +321,7 @@ wrap.appendChild(btn); wrap.appendChild(menu)
       const panelRaw  = ['three.webp','four.webp']
       const headerUrls = headerRaw.map((p) => chrome.runtime.getURL(p))
       const panelUrls  = panelRaw.map((p) => chrome.runtime.getURL(p))
-      if (DBG) console.log('[DACTI] header frames:', headerUrls, 'panel frames:', panelUrls)
+     
 
       // Fallback: convert to data: URL only if extension URL fails
       const toDataUrl = async (extUrl: string) => {
@@ -345,7 +345,7 @@ wrap.appendChild(btn); wrap.appendChild(menu)
         if (!triedDataPanel[pi]) {
           triedDataPanel[pi] = true
           const dataUrl = await toDataUrl(panelUrls[pi])
-          if (DBG) console.warn('[DACTI] panel img error, switching to data: for', panelUrls[pi])
+          
           img.src = dataUrl
         }
       }
@@ -353,7 +353,7 @@ wrap.appendChild(btn); wrap.appendChild(menu)
       // Initial frames
       img.src = cacheBust(panelUrls[0])
       if (headerLoaderImg) headerLoaderImg.src = cacheBust(headerUrls[0])
-      if (DBG) console.log('[DACTI] first frames set → header:', headerUrls[0], 'panel:', panelUrls[0])
+      
 
       const wrap = document.createElement('div'); wrap.className = 'loadingAnim'; wrap.appendChild(img)
       outEl.innerHTML = ''
@@ -385,7 +385,7 @@ wrap.appendChild(btn); wrap.appendChild(menu)
       panelTimer = window.setTimeout(advancePanel, 300)
     }
     function stopLoading() {
-      if (DBG) console.log('[DACTI] stopLoading()')
+     
       if (headerTimer) { clearTimeout(headerTimer); headerTimer = null }
       if (panelTimer)  { clearTimeout(panelTimer);  panelTimer = null }
       if (headerLoaderImg) headerLoaderImg.src = chrome.runtime.getURL('one.webp')
@@ -515,7 +515,7 @@ function setActive(kind: 'summarize' | 'translate' | 'altimages' | 'write') {
   writeDD.btn.classList.toggle('active', kind === 'write')
 }
     const run = async (action: 'summarize' | 'translate' | 'altimages' | 'write', params?: any) => {
-      if (DBG) console.log('[DACTI] run()', action, params)
+      
         setActive(action)
       startLoading()
       await detectLocalAvailability()
@@ -582,7 +582,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (!msg || typeof msg !== 'object') return
 
   if (msg.type === 'DACTI_LOADING') {
-    if (DBG) console.log('[DACTI] DACTI_LOADING show=', msg.show)
+   
     ensurePanel()!
     if (msg.show) panelAPI?.startLoading(); else panelAPI?.stopLoading()
     return
