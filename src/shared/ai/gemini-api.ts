@@ -5,7 +5,7 @@
 //  - dactiProxyUrl: string (e.g., https://your-proxy.example.com)
 //  - dactiProxyToken: string (optional bearer passed to proxy)
 //  - dactiUserApiKey: string (NOT RECOMMENDED; user-provided Gemini key)
-
+const cloudLog = (...a: any[]) => { try { console.log('[DACTI][CLOUD]', ...a) } catch {} }
 export async function callGeminiApi(prompt: string, options: { signal?: AbortSignal } = {}): Promise<string> {
   const {
     dactiCloudEnabled,
@@ -31,13 +31,20 @@ export async function callGeminiApi(prompt: string, options: { signal?: AbortSig
     .map(v => typeof v === 'string' ? v.trim() : '')
     .find(v => !!v) || ''
   let proxyUrlRaw = proxyUrlCanon || proxyUrlCompat
+  
   const userKeyRaw = typeof dactiUserApiKey === 'string' ? dactiUserApiKey.trim() : ''
   const proxyTokCanon = typeof dactiProxyToken === 'string' ? dactiProxyToken.trim() : ''
   const proxyTokCompat = [extra?.proxyToken, extra?.PROXY_TOKEN]
     .map(v => typeof v === 'string' ? v.trim() : '')
     .find(v => !!v) || ''
   let proxyTokenRaw = proxyTokCanon || proxyTokCompat
-
+cloudLog('config', {
+  cloudEnabled: dactiCloudEnabled,
+  cloudMode: cloudModeRaw || '',
+  hasProxyUrl: !!proxyUrlRaw,
+  hasUserKey: !!userKeyRaw,
+  hasProxyToken: !!proxyTokenRaw,
+})
   // Last-resort sweep across all keys if nothing found (handles dev console sets)
   if (!proxyUrlRaw || !proxyTokenRaw) {
     try {
@@ -71,7 +78,9 @@ export async function callGeminiApi(prompt: string, options: { signal?: AbortSig
     else if (userKeyRaw) mode = 'userkey'
   }
   const cloudEnabled = (typeof dactiCloudEnabled === 'boolean') ? dactiCloudEnabled : true
+  cloudLog('mode chosen', { mode, cloudEnabled })
   if (!cloudEnabled) {
+      cloudLog('cloud disabled by settings')
     throw new Error('Cloud fallback is disabled in settings. Enable it in the panel or set dactiCloudEnabled=true.')
   }
 
@@ -80,6 +89,7 @@ export async function callGeminiApi(prompt: string, options: { signal?: AbortSig
     if (!base) throw new Error('Cloud proxy is not configured.')
     const url = base.replace(/\/$/, '') + '/generate'
     const extId = (typeof chrome !== 'undefined' && chrome?.runtime?.id) ? chrome.runtime.id : ''
+    cloudLog('proxy request → /generate', { base, hasToken: !!proxyTokenRaw })
     const res = await fetch(url, {
       method: 'POST',
       headers: {
@@ -91,11 +101,13 @@ export async function callGeminiApi(prompt: string, options: { signal?: AbortSig
       signal: options.signal,
     })
     if (!res.ok) {
+      cloudLog('proxy error', res.status)
       const body = await safeText(res)
       throw new Error(`Proxy error ${res.status}: ${body}`)
     }
     const data = await res.json().catch(() => ({} as any))
     const text = data?.text ?? data?.output ?? data?.result ?? ''
+    cloudLog('proxy ok', { hasText: !!text })
     if (!text) throw new Error('Proxy returned no text.')
     return String(text)
   }
@@ -104,6 +116,7 @@ export async function callGeminiApi(prompt: string, options: { signal?: AbortSig
     const key = userKeyRaw
     if (!key) throw new Error('No user API key configured.')
     const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${encodeURIComponent(key)}`
+   cloudLog('userkey request → generateContent', { endpoint: url.replace(/key=[^&]+/, 'key=***') })
     const res = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -111,11 +124,13 @@ export async function callGeminiApi(prompt: string, options: { signal?: AbortSig
       signal: options.signal,
     })
     if (!res.ok) {
+      cloudLog('userkey error', res.status)
       const body = await safeText(res)
       throw new Error(`Gemini API error ${res.status}: ${body}`)
     }
     const data = await res.json()
     const t = data?.candidates?.[0]?.content?.parts?.[0]?.text
+    cloudLog('userkey ok', { hasText: !!t })
     if (t) return String(t)
     if (data?.promptFeedback?.blockReason) throw new Error(`Blocked: ${data.promptFeedback.blockReason}`)
     throw new Error('Gemini API returned no content.')
@@ -125,6 +140,7 @@ export async function callGeminiApi(prompt: string, options: { signal?: AbortSig
   if (proxyUrlRaw) {
     const url = proxyUrlRaw.replace(/\/$/, '') + '/generate'
     const extId = (typeof chrome !== 'undefined' && chrome?.runtime?.id) ? chrome.runtime.id : ''
+    cloudLog('proxy request (fallback) → /generate', { base: proxyUrlRaw, hasToken: !!proxyTokenRaw })
     const res = await fetch(url, {
       method: 'POST',
       headers: {
@@ -136,17 +152,21 @@ export async function callGeminiApi(prompt: string, options: { signal?: AbortSig
       signal: options.signal,
     })
     if (!res.ok) {
+      cloudLog('proxy error (fallback)', res.status)
       const body = await safeText(res)
       throw new Error(`Proxy error ${res.status}: ${body}`)
     }
     const data = await res.json().catch(() => ({} as any))
     const text = data?.text ?? data?.output ?? data?.result ?? ''
+    cloudLog('proxy ok (fallback)', { hasText: !!text })
     if (!text) throw new Error('Proxy returned no text.')
     return String(text)
   }
   if (userKeyRaw) {
     const key = userKeyRaw
+  
     const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${encodeURIComponent(key)}`
+  cloudLog('userkey request (fallback) → generateContent', { endpoint: url.replace(/key=[^&]+/, 'key=***') })
     const res = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -154,11 +174,13 @@ export async function callGeminiApi(prompt: string, options: { signal?: AbortSig
       signal: options.signal,
     })
     if (!res.ok) {
+      cloudLog('userkey error (fallback)', res.status)
       const body = await safeText(res)
       throw new Error(`Gemini API error ${res.status}: ${body}`)
     }
     const data = await res.json()
     const t = data?.candidates?.[0]?.content?.parts?.[0]?.text
+    cloudLog('userkey ok (fallback)', { hasText: !!t })
     if (t) return String(t)
     if (data?.promptFeedback?.blockReason) throw new Error(`Blocked: ${data.promptFeedback.blockReason}`)
     throw new Error('Gemini API returned no content.')

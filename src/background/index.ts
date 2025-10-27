@@ -1,3 +1,4 @@
+const log = (...a: any[]) => { try { console.log('[DACTI]', ...a) } catch {} }
 const CANCELED_MSG = '⛔️ Request canceled by user.'
 // --- Task management for cancellation ---
 const tasks = new Map<number, { abort: AbortController, canceled: boolean, jobId: number }>()
@@ -97,55 +98,209 @@ function maskPII(s: string) {
 // Context Menus (right-click)
 // -----------------------------
 chrome.runtime.onInstalled.addListener(() => {
-  chrome.contextMenus.removeAll(() => {
+  chrome.contextMenus.removeAll(async () => {
+    // Base items
     chrome.contextMenus.create({ id: 'dacti-translate', title: 'DACTI • Translate selection', contexts: ['selection'] })
-    chrome.contextMenus.create({ id: 'dacti-rewrite',   title: 'DACTI • Rewrite…',            contexts: ['selection'] })
+    chrome.contextMenus.create({ id: 'dacti-rewrite',   title: 'DACTI • Rewrite selection',   contexts: ['selection'] })
     chrome.contextMenus.create({ id: 'dacti-summarize', title: 'DACTI • Summarize selection', contexts: ['selection'] })
+
+    // Read saved prefs
+    const { dactiSummarizeMode, dactiTranslateTarget, dactiRewriteStyle } = await chrome.storage.local.get([
+      'dactiSummarizeMode','dactiTranslateTarget','dactiRewriteStyle'
+    ])
+
+    // Summarize submenu (radio)
+    const currentSum = (typeof dactiSummarizeMode === 'string') ? dactiSummarizeMode : 'bullets'
+    const sumModes = [
+      ['tldr',     'TL;DR (1–2 sentences)'],
+      ['bullets',  '5 bullet points'],
+      ['eli5',     'ELI5 (simplify)'],
+      ['sections', 'By sections (H2/H3)'],
+      ['facts',    'Key facts & numbers'],
+    ] as const
+    for (const [id, title] of sumModes) {
+      chrome.contextMenus.create({
+        id: `dacti-sum-${id}`,
+        parentId: 'dacti-summarize',
+        title,
+        contexts: ['selection'],
+        type: 'radio',
+        checked: currentSum === id,
+      })
+    }
+
+    // Translate submenu (radio)
+    const currentTr = (typeof dactiTranslateTarget === 'string') ? dactiTranslateTarget : 'en'
+    const trModes = [
+      ['en', '→ English'],
+      ['fr', '→ Français'],
+      ['es', '→ Español'],
+      ['de', '→ Deutsch'],
+      ['pt', '→ Português'],
+      ['auto', 'Auto → English'],
+    ] as const
+    for (const [id, title] of trModes) {
+      chrome.contextMenus.create({
+        id: `dacti-tr-${id}`,
+        parentId: 'dacti-translate',
+        title,
+        contexts: ['selection'],
+        type: 'radio',
+        checked: currentTr === id,
+      })
+    }
+
+    // Rewrite submenu (radio)
+    const currentRw = (typeof dactiRewriteStyle === 'string') ? dactiRewriteStyle : 'simplify'
+    const rwModes = [
+      ['simplify', 'Simplify (clear & plain)'],
+      ['formal',   'More formal/professional'],
+      ['friendly', 'Friendlier / conversational'],
+      ['shorten',  'Shorter / concise'],
+      ['expand',   'Longer / more details'],
+    ] as const
+    for (const [id, title] of rwModes) {
+      chrome.contextMenus.create({
+        id: `dacti-rw-${id}`,
+        parentId: 'dacti-rewrite',
+        title,
+        contexts: ['selection'],
+        type: 'radio',
+        checked: currentRw === id,
+      })
+    }
   })
 })
 
 chrome.contextMenus.onClicked.addListener(async (info, tab) => {
   try {
+    log('contextMenu clicked', info.menuItemId, { localOnly: undefined })
     const { dactiLocalOnly, dactiMaskPII } = await chrome.storage.local.get(['dactiLocalOnly','dactiMaskPII'])
     const localOnly = Boolean(dactiLocalOnly)
     const t = startTask(tab?.id || -1)
     const signal = t.abort.signal
     stopToggle(tab?.id, true)
 
-    if (info.menuItemId === 'dacti-translate' && info.selectionText) {
+    if ((info.menuItemId === 'dacti-translate' || String(info.menuItemId).startsWith('dacti-tr-')) && info.selectionText) {
       await openPanel(tab?.id, { title: 'DACTI', message: '' })
       loading(tab?.id, true)
-      const key = 'tr:' + hash(info.selectionText + '|en' + Number(localOnly))
+
+      // Determine target language
+      let target = 'en'
+      if (String(info.menuItemId).startsWith('dacti-tr-')) {
+        target = String(info.menuItemId).replace('dacti-tr-', '')
+        try { await chrome.storage.local.set({ dactiTranslateTarget: target }) } catch {}
+      } else {
+        const { dactiTranslateTarget } = await chrome.storage.local.get(['dactiTranslateTarget'])
+        target = (typeof dactiTranslateTarget === 'string') ? dactiTranslateTarget : 'en'
+      }
+
+      const key = 'tr:' + hash(info.selectionText + '|' + target + Number(localOnly))
       const cached = await cacheGet(key)
       if (cached) return updatePanel(tab?.id, { message: String(cached).slice(0,5000) })
-      const input = (!localOnly && dactiMaskPII) ? maskPII(info.selectionText) : info.selectionText
-      const out = await translateText(input, 'en', { localOnly, signal })
+
+      const raw = info.selectionText
+      const input = (!localOnly && dactiMaskPII) ? maskPII(raw) : raw
+      log('PATH', localOnly ? 'LOCAL' : 'CLOUD', { action: 'translate', source: 'context', target })
+
+      let out: string
+      try {
+        if (localOnly) {
+          const resp: any = await chrome.tabs.sendMessage(tab?.id as number, { type: 'DACTI_TRANSLATE_LOCAL', text: input, target: (target === 'auto' ? 'en' : target) })
+          if (!resp?.ok) throw new Error(resp?.error || 'Local translate failed')
+          out = String(resp.text || '')
+          if (!out.trim()) out = '(no translation produced by local model)'
+        } else {
+          // Cloud path via shared translator; if it fails (offline), fallback to local
+          try {
+            out = await translateText(input, (target === 'auto' ? 'en' : target) as any, { localOnly: false, signal })
+          } catch (e: any) {
+            const msg = String(e?.message || e || '')
+            log('translate cloud path error, attempting local fallback', msg)
+            const resp: any = await chrome.tabs.sendMessage(tab?.id as number, { type: 'DACTI_TRANSLATE_LOCAL', text: input, target: (target === 'auto' ? 'en' : target) })
+            if (!resp?.ok) throw new Error(`Cloud translate failed and local fallback failed: ${resp?.error || 'unknown error'}`)
+            out = String(resp.text || '')
+            if (!out.trim()) out = '(no translation produced by local model)'
+          }
+        }
+      } catch (e) {
+        updatePanel(tab?.id, { title: 'DACTI • Translate', message: String((e as any)?.message || e) })
+        loading(tab?.id, false)
+        return
+      }
+
       await cacheSet(key, out)
       if (getTask(tab?.id || -1)?.canceled) return
       return updatePanel(tab?.id, { message: String(out).slice(0,5000) })
     }
 
-    if (info.menuItemId === 'dacti-rewrite' && info.selectionText) {
+    if ((info.menuItemId === 'dacti-rewrite' || String(info.menuItemId).startsWith('dacti-rw-')) && info.selectionText) {
       await openPanel(tab?.id, { title: 'DACTI', message: '' })
       loading(tab?.id, true)
-      const key = 'rw:' + hash(info.selectionText + '|simplify' + Number(localOnly))
+
+      // Determine style: submenu explicit or last saved for parent click
+      let style = 'simplify'
+      if (String(info.menuItemId).startsWith('dacti-rw-')) {
+        style = String(info.menuItemId).replace('dacti-rw-', '')
+        try { await chrome.storage.local.set({ dactiRewriteStyle: style }) } catch {}
+      } else {
+        const { dactiRewriteStyle } = await chrome.storage.local.get(['dactiRewriteStyle'])
+        style = (typeof dactiRewriteStyle === 'string') ? dactiRewriteStyle : 'simplify'
+      }
+
+      const key = 'rw:' + hash(info.selectionText + '|' + style + Number(localOnly))
       const cached = await cacheGet(key)
       if (cached) return updatePanel(tab?.id, { message: String(cached).slice(0,5000) })
-      const input = (!localOnly && dactiMaskPII) ? maskPII(info.selectionText) : info.selectionText
-      const out = await rewriteText(input, { style: 'simplify' }, { localOnly, signal })
+
+      const raw = info.selectionText
+      const input = (!localOnly && dactiMaskPII) ? maskPII(raw) : raw
+      log('PATH', localOnly ? 'LOCAL' : 'CLOUD', { action: 'rewrite', source: 'context', style })
+
+      let out: string
+      if (localOnly) {
+        const resp: any = await chrome.tabs.sendMessage(tab?.id as number, { type: 'DACTI_REWRITE_LOCAL', text: input, style })
+        if (!resp?.ok) throw new Error(resp?.error || 'Local rewrite failed')
+        out = String(resp.text || '')
+      } else {
+        out = await rewriteText(input, { style }, { localOnly, signal })
+      }
+
       await cacheSet(key, out)
       if (getTask(tab?.id || -1)?.canceled) return
       return updatePanel(tab?.id, { message: String(out).slice(0,5000) })
     }
 
-    if (info.menuItemId === 'dacti-summarize' && info.selectionText) {
+    if ((info.menuItemId === 'dacti-summarize' || String(info.menuItemId).startsWith('dacti-sum-')) && info.selectionText) {
       await openPanel(tab?.id, { title: 'DACTI', message: '' })
       loading(tab?.id, true)
-      const key = 'sm:' + hash(info.selectionText + Number(localOnly))
+
+      // Determine mode: submenu explicit or last saved for parent click
+      let mode = 'bullets'
+      if (String(info.menuItemId).startsWith('dacti-sum-')) {
+        mode = String(info.menuItemId).replace('dacti-sum-', '')
+        try { await chrome.storage.local.set({ dactiSummarizeMode: mode }) } catch {}
+      } else {
+        const { dactiSummarizeMode } = await chrome.storage.local.get(['dactiSummarizeMode'])
+        mode = (typeof dactiSummarizeMode === 'string') ? dactiSummarizeMode : 'bullets'
+      }
+
+      const key = 'sm:' + hash(info.selectionText + '|' + mode + Number(localOnly))
       const cached = await cacheGet(key)
       if (cached) return updatePanel(tab?.id, { message: String(cached).slice(0,5000) })
+
       const input = (!localOnly && dactiMaskPII) ? maskPII(info.selectionText) : info.selectionText
-      const out = await summarizePage(input, { localOnly, signal })
+      log('PATH', localOnly ? 'LOCAL' : 'CLOUD', { action: 'summarize', source: 'context', mode })
+
+      let out: string
+      if (localOnly) {
+        const resp: any = await chrome.tabs.sendMessage(tab?.id as number, { type: 'DACTI_SUMMARIZE_LOCAL', text: input, mode })
+        if (!resp?.ok) throw new Error(resp?.error || 'Local summarize failed')
+        out = String(resp.text || '')
+        if (!out.trim()) { out = '(no summary produced by local model)' }
+      } else {
+        out = await summarizePage(input, { localOnly, mode, signal })
+      }
+
       await cacheSet(key, out)
       if (getTask(tab?.id || -1)?.canceled) return
       return updatePanel(tab?.id, { message: String(out).slice(0,5000) })
@@ -157,6 +312,65 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
     stopToggle(tab?.id, false)
   }
 })
+// Keyboard shortcuts (panel-independent). Requires manifest "commands" entries.
+chrome.commands?.onCommand.addListener(async (command) => {
+  try {
+    if (!/^dacti-sum-(tldr|bullets|eli5|sections)$/.test(command)) return
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
+    if (!tab?.id) return
+
+    const { dactiLocalOnly, dactiMaskPII } = await chrome.storage.local.get(['dactiLocalOnly','dactiMaskPII'])
+    const localOnly = Boolean(dactiLocalOnly)
+
+    const t = startTask(tab.id)
+    const signal = t.abort.signal
+    stopToggle(tab.id, true)
+
+    await openPanel(tab.id, { title: 'DACTI', message: '' })
+    loading(tab.id, true)
+
+    const [{ result: sel } = { result: '' }] = await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      func: () => window.getSelection()?.toString() || ''
+    })
+    if (!sel) { updatePanel(tab.id, { message: 'Empty selection.' }); return }
+
+    const mode = command.replace('dacti-sum-','')
+    try { await chrome.storage.local.set({ dactiSummarizeMode: mode }) } catch {}
+
+    const key = 'sm:' + hash(sel + '|' + mode + Number(localOnly))
+    const cached = await cacheGet(key)
+    if (cached) { updatePanel(tab.id, { message: String(cached).slice(0,5000) }); return }
+
+    const input = (!localOnly && dactiMaskPII) ? maskPII(sel) : sel
+    log('PATH', localOnly ? 'LOCAL' : 'CLOUD', { action: 'summarize', source: 'command', mode })
+
+    let out: string
+    if (localOnly) {
+      const resp: any = await chrome.tabs.sendMessage(tab.id, { type: 'DACTI_SUMMARIZE_LOCAL', text: input, mode })
+      if (!resp?.ok) throw new Error(resp?.error || 'Local summarize failed')
+      out = String(resp.text || '')
+      if (!out.trim()) { out = '(no summary produced by local model)' }
+    } else {
+      out = await summarizePage(input, { localOnly, mode, signal })
+    }
+
+    await cacheSet(key, out)
+    if (getTask(tab.id)?.canceled) { stopToggle(tab.id, false); return }
+    updatePanel(tab.id, { message: String(out).slice(0,5000) })
+  } catch (e) {
+    try {
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
+      if (tab?.id) updatePanel(tab.id, { title: 'DACTI • Error', message: String((e as any)?.message || e) })
+    } catch {}
+  } finally {
+    try {
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
+      if (tab?.id) { loading(tab.id, false); stopToggle(tab.id, false) }
+    } catch {}
+  }
+})
+
 
 // -----------------------------
 // Toolbar icon → open panel
@@ -194,7 +408,9 @@ chrome.runtime.onMessage.addListener(async (msg, sender) => {
   if (!tabId) return
 
   const { dactiLocalOnly, dactiMaskPII } = await chrome.storage.local.get(['dactiLocalOnly','dactiMaskPII'])
-  const localOnly = Boolean(dactiLocalOnly)
+  const localOnly = (typeof (msg as any).localOnly === 'boolean') ? Boolean((msg as any).localOnly) : Boolean(dactiLocalOnly)
+
+  log('panel action received', msg?.action, { localOnly, tabId })
 
   try {
     if (msg.type === 'DACTI_ACTION') {
@@ -215,7 +431,16 @@ chrome.runtime.onMessage.addListener(async (msg, sender) => {
         const cached = await cacheGet(key)
         if (cached) return updatePanel(tabId, { message: String(cached).slice(0,5000) })
         const input = (!localOnly && dactiMaskPII) ? maskPII(sel) : sel
-        const out = await translateText(input, target as any, { localOnly, signal })
+      log('PATH', localOnly ? 'LOCAL' : 'CLOUD', { action: 'translate' })
+        let out: string
+        if (localOnly) {
+          const resp: any = await chrome.tabs.sendMessage(tabId, { type: 'DACTI_TRANSLATE_LOCAL', text: input, target })
+          if (!resp?.ok) throw new Error(resp?.error || 'Local translate failed')
+          out = String(resp.text || '')
+        } else {
+          out = await translateText(input, target as any, { localOnly, signal })
+        }
+        log('translate done', { localOnly, len: out?.length })
         await cacheSet(key, out)
         if (getTask(tabId)?.canceled) { stopToggle(tabId, false); return }
         return updatePanel(tabId, { message: String(out).slice(0,5000) })
@@ -234,7 +459,16 @@ chrome.runtime.onMessage.addListener(async (msg, sender) => {
         const cached = await cacheGet(key)
         if (cached) return updatePanel(tabId, { message: String(cached).slice(0,5000) })
         const input = (!localOnly && dactiMaskPII) ? maskPII(sel) : sel
-        const out = await rewriteText(input, { style }, { localOnly, signal })
+      log('PATH', localOnly ? 'LOCAL' : 'CLOUD', { action: 'rewrite' })
+        let out: string
+        if (localOnly) {
+          const resp: any = await chrome.tabs.sendMessage(tabId, { type: 'DACTI_REWRITE_LOCAL', text: input, style })
+          if (!resp?.ok) throw new Error(resp?.error || 'Local rewrite failed')
+          out = String(resp.text || '')
+        } else {
+          out = await rewriteText(input, { style }, { localOnly, signal })
+        }
+        log('rewrite done', { localOnly, len: out?.length })
         await cacheSet(key, out)
         if (getTask(tabId)?.canceled) { stopToggle(tabId, false); return }
         return updatePanel(tabId, { message: String(out).slice(0,5000) })
@@ -253,10 +487,41 @@ chrome.runtime.onMessage.addListener(async (msg, sender) => {
         }
         if (!input.trim()) return updatePanel(tabId, { message: 'Empty selection.' })
         const masked = (!localOnly && dactiMaskPII) ? maskPII(input) : input
+        log('PATH', localOnly ? 'LOCAL' : 'CLOUD', { action: 'summarize', mode: params?.summarizeMode })
         const key = 'sm:' + hash(masked + String(params.summarizeMode || '') + Number(localOnly))
         const cached = await cacheGet(key)
         if (cached) return updatePanel(tabId, { message: String(cached).slice(0,5000) })
-        const out = await summarizePage(masked, { localOnly, mode: params.summarizeMode, signal })
+        let out: string
+        if (localOnly) {
+          const resp: any = await chrome.tabs.sendMessage(tabId, { type: 'DACTI_SUMMARIZE_LOCAL', text: masked, mode: params.summarizeMode })
+          if (!resp?.ok) throw new Error(resp?.error || 'Local summarize failed')
+          out = String(resp.text || '')
+          if (!out.trim()) { out = '(no summary produced by local model)' }
+        } else {
+          try {
+            out = await summarizePage(masked, { localOnly, mode: params.summarizeMode, signal })
+          } catch (err: any) {
+            log('summarize cloud path error, falling back to direct API', err?.message)
+            out = ''
+          }
+          if (!out || /input\s+is\s+undefined/i.test(String(out))) {
+            try {
+              const { callGeminiApi } = await import('@/shared/ai/gemini-api')
+              const m = String(params.summarizeMode || 'bullets')
+              const prompt = (
+                m === 'tldr'     ? `TL;DR in 1–2 sentences.\n\n${masked}` :
+                m === 'eli5'     ? `Explain simply (ELI5). Use short sentences.\n\n${masked}` :
+                m === 'sections' ? `Summarize by sections with H2/H3 headings.\n\n${masked}` :
+                m === 'facts'    ? `Extract key facts and numbers as bullet points.\n\n${masked}` :
+                                   `Summarize in 5 concise bullet points.\n\n${masked}`
+              )
+              out = await callGeminiApi(prompt, { signal })
+            } catch (e: any) {
+              if (!out) throw e
+            }
+          }
+        }
+        log('summarize done', { localOnly, len: out?.length })
         await cacheSet(key, out)
         if (getTask(tabId)?.canceled) { stopToggle(tabId, false); return }
         return updatePanel(tabId, { message: String(out).slice(0, 5000) })
@@ -270,16 +535,19 @@ chrome.runtime.onMessage.addListener(async (msg, sender) => {
           func: () => Array.from(document.images).map(im => im.currentSrc || im.src).filter(Boolean)
         })
         const uniq = Array.from(new Set((urls || []) as string[])).slice(0, 24)
+        log('altimages found', uniq.length, 'images', { localOnly })
         if (!uniq.length) return updatePanel(tabId, { message: 'No images found on this page.' })
 
         const items: Array<{ src:string; alt:string; tags:string[]; preview?:string; category?: string; tone?: string }> = []
         let i = 0
         for (const src of uniq) {
           i++
+          log('altimages processing', i, '/', uniq.length, src)
           progress(tabId, i/uniq.length)
           try {
             if (localOnly) {
               const resp: any = await chrome.tabs.sendMessage(tabId, { type: 'DACTI_CAPTION_LOCAL', src })
+              log('altimages local caption ok?', !!resp?.ok)
               if (resp?.ok) {
                 items.push({ src, alt: String(resp.alt||'').slice(0,120), tags: Array.isArray(resp.tags)?resp.tags:[], preview: resp.preview, category: undefined, tone: undefined })
               }
@@ -288,6 +556,7 @@ chrome.runtime.onMessage.addListener(async (msg, sender) => {
               }
             } else {
               const got: any = await chrome.tabs.sendMessage(tabId, { type: 'DACTI_IMAGE_BASE64', src })
+              log('altimages cloud base64 ok?', !!got?.ok)
               if (!got?.ok) { items.push({ src, alt: '', tags: [], category: undefined, tone: undefined }); continue }
               const { dactiProxyUrl, dactiProxyToken } = await chrome.storage.local.get(['dactiProxyUrl','dactiProxyToken'])
               const proxy = String(dactiProxyUrl || '').replace(/\/$/, '')
@@ -332,6 +601,7 @@ chrome.runtime.onMessage.addListener(async (msg, sender) => {
               items.push({ src, alt, tags, preview: got.preview, category: undefined, tone: undefined })
             }
           } catch {
+            log('altimages error for', src)
             items.push({ src, alt: '', tags: [], category: undefined, tone: undefined })
           }
           if (getTask(tabId)?.canceled) { stopToggle(tabId, false); return }
@@ -342,7 +612,7 @@ chrome.runtime.onMessage.addListener(async (msg, sender) => {
       }
 
       if (msg.action === 'write') {
-        await openPanel(tabId, { title: 'DACTI • Write', message: '' })
+        await openPanel(tabId, { title: 'DACTI', message: '' })
         loading(tabId, true)
         let ctx: string
         if (params?.source === 'panel' && typeof params?.text === 'string') {
@@ -354,22 +624,35 @@ chrome.runtime.onMessage.addListener(async (msg, sender) => {
         const input = (!localOnly && dactiMaskPII) ? maskPII(ctx) : ctx
         const wt = String(params.writeType || 'email')
         const map: Record<string,string> = {
-          email: 'Draft a concise email (80–120 words) in English.',
-          linkedin: 'Write a professional LinkedIn post (4–6 lines) about the context. Keep it approachable and clear.',
-          tweet: 'Write a short social post (max 240 chars) with a friendly tone.',
+          email: 'Draft a concise email (400-600 words) in English.',
+          linkedin: 'Write a professional LinkedIn post (300-400 words) about the context. Keep it approachable and clear.',
+          tweet: 'Write a short social post (max 1500 chars) with a friendly tone.',
           minutes: 'Write meeting minutes: agenda, key decisions, action items with owners.',
           commit: 'Write a conventional commit message summarizing the changes (type(scope): subject).',
         }
         const key = 'wr:' + hash(input + wt + Number(localOnly))
         const cached = await cacheGet(key)
         if (cached) return updatePanel(tabId, { message: String(cached).slice(0,5000) })
-        const out = await writeFromContext(input, { task: map[wt] || map.email }, { localOnly, signal })
-        await cacheSet(key, out)
-        if (getTask(tabId)?.canceled) { stopToggle(tabId, false); return }
-        return updatePanel(tabId, { message: String(out).slice(0, 5000) })
+      log('PATH', localOnly ? 'LOCAL' : 'CLOUD', { action: 'write' })
+let out: string
+if (localOnly) {
+  const resp: any = await chrome.tabs.sendMessage(tabId, {
+    type: 'DACTI_GENERATE_LOCAL_TEXT',
+    context: input,
+    task: map[wt] || map.email,
+  })
+  if (!resp?.ok) throw new Error(resp?.error || 'Local write failed')
+  out = String(resp.text || '')
+} else {
+  out = await writeFromContext(input, { task: map[wt] || map.email }, { localOnly, signal })
+}
+await cacheSet(key, out)
+if (getTask(tabId)?.canceled) { stopToggle(tabId, false); return }
+return updatePanel(tabId, { message: String(out).slice(0, 5000) })
       }
     }
   } catch (e: any) {
+    log('panel action error', msg?.action, e?.message)
     const canceled = !!getTask(tabId)?.canceled || String(e?.name||'').toLowerCase() === 'aborterror'
     return updatePanel(tabId, { title: 'DACTI • Error', message: canceled ? CANCELED_MSG : (e?.message ? String(e.message) : String(e)) })
   } finally {

@@ -8,13 +8,16 @@
     localOnlyCheckbox: HTMLInputElement
     btnSummarize: HTMLButtonElement
     btnTranslate: HTMLButtonElement
+    btnRewrite: HTMLButtonElement
     btnAlt: HTMLButtonElement
     btnWrite: HTMLButtonElement
     closeBtn: HTMLButtonElement
   } | null
 
   let refs: PanelRefs = null
+    let __buildingPanel = false
   const DBG = true
+  const log = (...a: any[]) => { try { console.log('[DACTI]', ...a) } catch {} }
   let panelAPI: { startLoading: () => void; stopLoading: () => void } | null = null
 
   const stripFences = (s: string) => { const m = String(s||'').match(/```(?:json)?\s*([\s\S]*?)```/i); return (m?m[1]:String(s||'')).trim() }
@@ -28,8 +31,9 @@
 
   function ensurePanel(): PanelRefs {
     if (refs) return refs
-
+    if (__buildingPanel) return refs as any
     const host = h('div') as HTMLDivElement
+        __buildingPanel = true
     host.id = 'dacti-floating-panel'
     Object.assign(host.style, {
       position: 'fixed', top: '0px', right: '16px', width: '320px', height: '100vh', zIndex: '2147483647', contain: 'layout'
@@ -221,9 +225,13 @@ let headerLoaderImg: HTMLImageElement | null = testImg
 
     const badge = h('span', 'badge', 'Detecting…')
     const setBadge = (isLocal: boolean, tipExtra = '') => {
-      badge.textContent = isLocal ? 'Local' : 'Cloud'
-      const baseTip = isLocal ? 'Local mode (on-device Gemini Nano).' : 'Cloud mode (proxy/API).'
+      const offline = isLocal && !navigator.onLine
+      badge.textContent = isLocal ? (offline ? 'Local (offline)' : 'Local') : 'Cloud'
+      const baseTip = isLocal
+        ? (offline ? 'Local on-device — offline.' : 'Local mode (on-device Gemini Nano).')
+        : 'Cloud mode (proxy/API).'
       badge.title = [baseTip, tipExtra].filter(Boolean).join(' ')
+      try { console.log('[DACTI]', 'BADGE', { isLocal, offline }) } catch {}
     }
     // Move the blue Cloud/Local badge into the header (to the right of the title)
     header.appendChild(badge)
@@ -237,7 +245,7 @@ const grid = h('div', 'grid')
 
 
     // --- Dropdown factory
-    function makeDropdown(label: string, items: {label:string, value:'summarize'|'translate'|'write', payload?:any}[]) {
+    function makeDropdown(label: string, items: {label:string, value:'summarize'|'translate'|'write'|'rewrite', payload?:any}[]) {
       const wrap = h('div') as HTMLDivElement
       const btn = h('button', 'btn', label + ' ▾') as HTMLButtonElement
       const menu = h('div') as HTMLDivElement
@@ -251,6 +259,16 @@ const grid = h('div', 'grid')
        mi.addEventListener('click', () => {
   menu.style.display = 'none'
   setActive(it.value as any)
+  const p: any = (it as any).payload || {}
+  if (it.value === 'summarize' && p?.summarizeMode) {
+    try { chrome.storage.local.set({ dactiSummarizeMode: p.summarizeMode }) } catch {}
+  }
+  if (it.value === 'translate' && p?.translateTarget) {
+    try { chrome.storage.local.set({ dactiTranslateTarget: p.translateTarget }) } catch {}
+  }
+  if (it.value === 'rewrite' && p?.style) {
+    try { chrome.storage.local.set({ dactiRewriteStyle: p.style }) } catch {}
+  }
   run(it.value, it.payload)
 })
         menu.appendChild(mi)
@@ -294,11 +312,19 @@ wrap.appendChild(btn); wrap.appendChild(menu)
       { label:'Meeting minutes', value:'write', payload:{ writeType:'minutes' } },
       { label:'Conventional commit', value:'write', payload:{ writeType:'commit' } },
     ])
+    const rewriteDD = makeDropdown('Rewrite', [
+      { label:'Simplify (clear & plain)', value:'rewrite', payload:{ style:'simplify' } },
+      { label:'More formal/professional', value:'rewrite', payload:{ style:'formal' } },
+      { label:'Friendlier / conversational', value:'rewrite', payload:{ style:'friendly' } },
+      { label:'Shorter / concise', value:'rewrite', payload:{ style:'shorten' } },
+      { label:'Longer / more details', value:'rewrite', payload:{ style:'expand' } },
+    ])
 
     const btnAlt = h('button', 'btn', 'Alt Images') as HTMLButtonElement
 
     grid.appendChild(summarizeDD.wrap)
     grid.appendChild(translateDD.wrap)
+    grid.appendChild(rewriteDD.wrap)
     grid.appendChild(btnAlt)
     grid.appendChild(writeDD.wrap)
 
@@ -413,6 +439,7 @@ wrap.appendChild(stopBtn)
     // --- Local availability detection and mode logic ---
     let localAvailable = false
     let userMode: 'auto'|'local'|'cloud' = 'auto'
+    let userTouchedToggle = false
 
     const showProgress = (p: number) => {
       const progressWrap = wrap.querySelector('.progressWrap') as HTMLDivElement
@@ -423,46 +450,104 @@ wrap.appendChild(stopBtn)
     }
 
     async function detectLocalAvailability() {
-      // Try to create a lightweight local session and listen for downloadprogress
-      // Prefer summarizer; if unavailable, try prompt multimodal
-      // @ts-ignore
-      const hasSummarizer = typeof ai !== 'undefined' && ai?.summarizer?.create
-      // @ts-ignore
-      const hasPrompt = typeof ai !== 'undefined' && ai?.prompt?.create
-      if (!hasSummarizer && !hasPrompt) {
+      // Prefer new global APIs (Summarizer/LanguageModel); fallback to legacy ai.* aggregator
+      const Summ = (self as any)?.Summarizer || (typeof ai !== 'undefined' ? (ai as any).summarizer : undefined)
+      const LM = (self as any)?.LanguageModel || (typeof ai !== 'undefined' ? (ai as any).prompt : undefined)
+      const hasSummarizer = !!(Summ && (Summ as any).create)
+      const hasPrompt = !!(LM && (LM as any).create)
+      log('detectLocalAvailability:', { hasSummarizer, hasPrompt, Summ: !!Summ, LM: !!LM })
+      // Helper to show a status message if not already set
+      const showStatus = (msg: string) => {
+        try {
+          const current = (outEl.textContent || '').trim()
+          if (!current) {
+            titleEl.textContent = 'DACTI'
+            outEl.textContent = msg
+          }
+        } catch {}
+      }
+      // Availability probe and early messaging
+      let availability = 'unknown' as string
+      try {
+        if (Summ && (Summ as any).availability) availability = await (Summ as any).availability()
+        else if (LM && (LM as any).availability) availability = await (LM as any).availability()
+      } catch {}
+      log('local availability state =', availability)
+
+      if (availability === 'unavailable') {
+        try { chrome.storage.local.set({ dactiLocalAvailable: false, dactiAvailability: availability }) } catch {}
+        log('local unavailable → falling back to cloud')
         localAvailable = false
         renderMode(false, true)
         setBadge(false, 'Local API unavailable')
+        showStatus('🚫 Mode local indisponible : API non disponible sur cet appareil/navigateur (voir exigences matérielles).')
+        return false
+      }
+
+      if ((availability === 'downloadable' || availability === 'downloading') && !navigator.userActivation.isActive) {
+        try { chrome.storage.local.set({ dactiLocalAvailable: false, dactiAvailability: availability }) } catch {}
+        log('local requires user activation to download, waiting for user action')
+        localAvailable = false
+        renderMode(false, true)
+        setBadge(false, 'Local model needs user activation to download')
+        showStatus('⬇️ Modèle local prêt à être téléchargé. Clique sur « Summarize », « Translate » ou « Alt Images » pour autoriser le téléchargement, puis surveille la barre de progression.')
+        return false
+      }
+
+      if (!hasSummarizer && !hasPrompt) {
+        try { chrome.storage.local.set({ dactiLocalAvailable: false, dactiAvailability: 'no-apis' }) } catch {}
+        log('no Summarizer/LanguageModel APIs found → cloud only')
+        localAvailable = false
+        renderMode(false, true)
+        setBadge(false, 'Local API unavailable')
+        showStatus('🚫 Mode local indisponible : API `ai.summarizer`/`ai.prompt` absente. Passage en Cloud.\nAstuce : si vous souhaitez tester le local, vérifiez vos réglages Chrome et les flags (chrome://flags) pour activer la Prompt API / modèles on‑device, puis relancez le panneau.')
         return false
       }
       showProgress(0)
       try {
         if (hasSummarizer) {
-          // @ts-ignore
-          const sm: any = await ai.summarizer.create({ model: 'gemini-nano' })
-          try { sm.addEventListener?.('downloadprogress', (e: any) => {
-            const frac = Math.min(1, Number(e?.loaded||0) / Math.max(1, Number(e?.total||1)))
-            showProgress(frac)
-          }) } catch {}
+        const sm: any = await (Summ as any).create({
+  type: 'key-points',
+  outputLanguage: 'en',
+  monitor(m: any) {
+              try {
+                m.addEventListener?.('downloadprogress', (e: any) => {
+                  const frac = Math.min(1, Number(e?.loaded || 0) / Math.max(1, Number(e?.total || 1)))
+                  showProgress(frac)
+                })
+              } catch {}
+            }
+          })
           // Quick no-op summarize to finalize init
-          await sm.summarize?.({ text: 'ok' })
+          await sm.summarize?.('ok')
         } else if (hasPrompt) {
-          // @ts-ignore
-          const pr: any = await ai.prompt.create({ multimodal: true, model: 'gemini-nano' })
-          try { pr.addEventListener?.('downloadprogress', (e: any) => {
-            const frac = Math.min(1, Number(e?.loaded||0) / Math.max(1, Number(e?.total||1)))
-            showProgress(frac)
-          }) } catch {}
-          await pr.generate?.({ image: new Blob([new Uint8Array([0])], { type: 'image/png' }), instruction: 'ok' }).catch(()=>{})
+          const pr: any = await (LM as any).create({
+            expectedInputs: [{ type: 'text' }],
+            expectedOutputs: [{ type: 'text' }],
+            monitor(m: any) {
+              try {
+                m.addEventListener?.('downloadprogress', (e: any) => {
+                  const frac = Math.min(1, Number(e?.loaded || 0) / Math.max(1, Number(e?.total || 1)))
+                  showProgress(frac)
+                })
+              } catch {}
+            }
+          })
+          await pr.prompt?.('ok')
         }
+        log('local init OK; model available on-device')
         localAvailable = true
         showProgress(1)
         setBadge(true)
+        try { chrome.storage.local.set({ dactiLocalAvailable: true, dactiAvailability: 'available' }) } catch {}
         return true
       } catch (e) {
+        try { chrome.storage.local.set({ dactiLocalAvailable: false, dactiAvailability: 'init-failed', dactiLocalError: String(e?.message || e) }) } catch {}
+        log('local init failed:', e)
         localAvailable = false
         setBadge(false, 'Local init failed')
         renderMode(false, true)
+        showStatus('⚠️ Échec de l\'initialisation du modèle local : ' + (e?.message || String(e)) + '\n→ Bascule automatique en mode Cloud.')
         return false
       }
     }
@@ -473,28 +558,43 @@ wrap.appendChild(stopBtn)
       return localAvailable // auto → prefer local if available
     }
 
-    // Load saved mode
+    // Keep badge in sync with network changes
+    window.addEventListener('online', () => { setBadge(effectiveLocal()) })
+    window.addEventListener('offline', () => { setBadge(effectiveLocal(), 'Offline') })
+
+    // Load saved mode (used only if the user touches the toggle this session)
     chrome.storage.local.get(['dactiMode']).then(({ dactiMode }) => {
-      userMode = (dactiMode === 'local' || dactiMode === 'cloud') ? dactiMode : 'auto'
-      // Initial render will be updated after detectLocalAvailability
+      const saved = (dactiMode === 'local' || dactiMode === 'cloud') ? dactiMode : 'auto'
+      userMode = saved
+      // We intentionally do not mark userTouchedToggle here; initial state will auto-follow detection
     })
 
     // Initialize local availability when panel opens
     detectLocalAvailability().then(() => {
-      const locked = !localAvailable
+      if (!userTouchedToggle) {
+        userMode = localAvailable ? 'local' : 'cloud'
+        chrome.storage.local.set({ dactiMode: userMode, dactiLocalOnly: userMode === 'local' && localAvailable })
+      } else {
+        // Keep dactiLocalOnly in sync with the effective state
+        chrome.storage.local.set({ dactiLocalOnly: effectiveLocal() })
+      }
       const currentLocal = effectiveLocal()
+      const locked = !localAvailable
       renderMode(currentLocal, locked && !currentLocal)
+      setBadge(currentLocal)
     })
 
     modeInput.addEventListener('change', () => {
+      userTouchedToggle = true
       if (!localAvailable && modeInput.checked) { // user tried to switch to Local but it's unavailable
         modeInput.checked = false
         return
       }
       userMode = modeInput.checked ? 'local' : 'cloud'
-      chrome.storage.local.set({ dactiMode: userMode })
-      renderMode(effectiveLocal(), !localAvailable && userMode !== 'cloud')
-      setBadge(effectiveLocal())
+      chrome.storage.local.set({ dactiMode: userMode, dactiLocalOnly: effectiveLocal() })
+      const currentLocal = effectiveLocal()
+      renderMode(currentLocal, !localAvailable && !currentLocal)
+      setBadge(currentLocal)
     })
 
     // Theme state
@@ -508,19 +608,27 @@ wrap.appendChild(stopBtn)
       chrome.storage.local.set({ dactiTheme: mode })
       applyTheme(mode)
     })
-function setActive(kind: 'summarize' | 'translate' | 'altimages' | 'write') {
+function setActive(kind: 'summarize' | 'translate' | 'altimages' | 'write' | 'rewrite') {
   summarizeDD.btn.classList.toggle('active', kind === 'summarize')
   translateDD.btn.classList.toggle('active', kind === 'translate')
+  rewriteDD.btn.classList.toggle('active', kind === 'rewrite')
   btnAlt.classList.toggle('active', kind === 'altimages')
   writeDD.btn.classList.toggle('active', kind === 'write')
 }
-    const run = async (action: 'summarize' | 'translate' | 'altimages' | 'write', params?: any) => {
-      
+    const run = async (action: 'summarize' | 'translate' | 'altimages' | 'write' | 'rewrite', params?: any) => {
         setActive(action)
       startLoading()
       await detectLocalAvailability()
+      if (!userTouchedToggle) {
+        userMode = localAvailable ? 'local' : 'cloud'
+        chrome.storage.local.set({ dactiMode: userMode, dactiLocalOnly: userMode === 'local' && localAvailable })
+      } else {
+        chrome.storage.local.set({ dactiLocalOnly: effectiveLocal() })
+      }
       const localOnly = effectiveLocal()
+      renderMode(localOnly, !localAvailable && !localOnly)
       setBadge(localOnly)
+      log('RUN', action, { localOnly, userMode, localAvailable, online: navigator.onLine })
       stopBtn.style.display = 'inline-flex'; (stopBtn as HTMLButtonElement).disabled = false
       modeInput.disabled = true; switchEl.classList.add('disabled')
       disable(true)
@@ -537,7 +645,7 @@ function setActive(kind: 'summarize' | 'translate' | 'altimages' | 'write') {
     }
 
     function disable(v: boolean) {
-      (summarizeDD.btn.disabled = v), (translateDD.btn.disabled = v), (writeDD.btn.disabled = v)
+      (summarizeDD.btn.disabled = v), (translateDD.btn.disabled = v), (rewriteDD.btn.disabled = v), (writeDD.btn.disabled = v)
       btnAlt.disabled = v
     }
 
@@ -567,8 +675,20 @@ btnAlt.addEventListener('click', () => { setActive('altimages'); run('altimages'
     const onUp = () => { dragging = false }
     document.addEventListener('mousemove', onMove)
     document.addEventListener('mouseup', onUp)
-
-  refs = { root, host, header, titleEl, outEl, localOnlyCheckbox: undefined as any, btnSummarize: summarizeDD.btn, btnTranslate: translateDD.btn, btnAlt, btnWrite: writeDD.btn, closeBtn }
+    // Keyboard shortcuts when panel is present: Alt+1..5 map to summarize modes
+    document.addEventListener('keydown', (ev) => {
+      if (!refs) return
+      if (!ev.altKey || ev.repeat) return
+      const map: Record<string,string> = { '1':'tldr','2':'bullets','3':'eli5','4':'sections','5':'facts' }
+      const m = map[ev.key]
+      if (!m) return
+      ev.preventDefault()
+      try { chrome.storage.local.set({ dactiSummarizeMode: m }) } catch {}
+      setActive('summarize')
+      run('summarize', { summarizeMode: m })
+    })
+    __buildingPanel = false
+  refs = { root, host, header, titleEl, outEl, localOnlyCheckbox: undefined as any, btnSummarize: summarizeDD.btn, btnTranslate: translateDD.btn, btnRewrite: rewriteDD.btn, btnAlt, btnWrite: writeDD.btn, closeBtn }
     return refs
   }
 
@@ -591,8 +711,22 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (msg.type === 'DACTI_CAPTION_LOCAL') {
     (async () => {
       try {
-        const resp = await fetch(msg.src, { mode: 'cors' })
-        const blob = await resp.blob()
+        log('CAPTION_LOCAL request for', msg.src)
+        let blob: Blob | null = null
+        try {
+          const el = Array.from(document.images).find(im => (im.currentSrc || im.src) === msg.src) as HTMLImageElement | undefined
+          if (el && el.complete && el.naturalWidth && el.naturalHeight) {
+            const c = document.createElement('canvas'); c.width = el.naturalWidth; c.height = el.naturalHeight
+            const g = c.getContext('2d')!; g.drawImage(el, 0, 0)
+            blob = await new Promise<Blob>((resolve) => c.toBlob(b => resolve(b || new Blob()), 'image/png'))
+            log('CAPTION_LOCAL: used image from DOM')
+          }
+        } catch (e) { log('CAPTION_LOCAL: DOM extraction failed, will fetch:', e) }
+        if (!blob) {
+          const resp = await fetch(msg.src, { mode: 'cors' })
+          blob = await resp.blob()
+          log('CAPTION_LOCAL: fetched image over network (may fail offline)')
+        }
         // @ts-ignore
         const hasPrompt = typeof ai !== 'undefined' && ai?.prompt?.create
         if (!hasPrompt) throw new Error('Local multimodal API unavailable')
@@ -627,18 +761,275 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (msg.type === 'DACTI_IMAGE_BASE64') {
     (async () => {
       try {
-        const resp = await fetch(msg.src, { mode: 'cors' })
-        const blob = await resp.blob()
-        const b64 = await new Promise<string>((resolve, reject) => {
-          const fr = new FileReader(); fr.onload = () => resolve(String(fr.result).split(',')[1] ?? ''); fr.onerror = reject; fr.readAsDataURL(blob)
-        })
-        const dataUrl = 'data:'+(blob.type||'image/png')+';base64,'+b64
+        log('IMAGE_BASE64 for', msg.src)
+        let dataUrl: string | null = null
+        try {
+          const el = Array.from(document.images).find(im => (im.currentSrc || im.src) === msg.src) as HTMLImageElement | undefined
+          if (el && el.complete && el.naturalWidth && el.naturalHeight) {
+            const c = document.createElement('canvas'); c.width = el.naturalWidth; c.height = el.naturalHeight
+            const g = c.getContext('2d')!; g.drawImage(el, 0, 0)
+            dataUrl = c.toDataURL('image/png')
+            log('IMAGE_BASE64: produced from DOM')
+          }
+        } catch (e) { log('IMAGE_BASE64: DOM extraction failed, will fetch:', e) }
+        if (!dataUrl) {
+          const resp = await fetch(msg.src, { mode: 'cors' })
+          const blob = await resp.blob()
+          const b64tmp = await new Promise<string>((resolve, reject) => {
+            const fr = new FileReader(); fr.onload = () => resolve(String(fr.result).split(',')[1] ?? ''); fr.onerror = reject; fr.readAsDataURL(blob)
+          })
+          dataUrl = 'data:'+(blob.type||'image/png')+';base64,'+b64tmp
+          log('IMAGE_BASE64: fetched image over network (may fail offline)')
+        }
+        const b64 = (dataUrl.split(',')[1] || '')
         sendResponse({ ok:true, base64: b64, preview: dataUrl })
       } catch (e:any) { sendResponse({ ok:false, error: e?.message || String(e) }) }
     })()
     return true
   }
 
+  // Local-only text ops (summarize / translate / rewrite)
+  // if (msg.type === 'DACTI_SUMMARIZE_LOCAL') {
+  //   (async () => {
+  //     try {
+  //       const text = String(msg.text || '')
+  //       const mode = String(msg.mode || '')
+  //       const Summ = (self as any)?.Summarizer || (typeof ai !== 'undefined' ? (ai as any).summarizer : undefined)
+  //       const LM   = (self as any)?.LanguageModel || (typeof ai !== 'undefined' ? (ai as any).prompt     : undefined)
+  //       log('LOCAL summarize using', { Summ: !!Summ, LM: !!LM, mode })
+  //       let out = ''
+  //       if (Summ && (Summ as any).create) {
+  //       const sm: any = await (Summ as any).create({ type: 'key-points', outputLanguage: 'en' })
+  //         out = String(await sm.summarize?.(text) ?? '')
+  //       } else if (LM && (LM as any).create) {
+  //         const pr: any = await (LM as any).create({ expectedInputs:[{type:'text'}], expectedOutputs:[{type:'text'}] })
+  //         const prompt = ['Summarize the following text clearly.', mode ? `Mode: ${mode}` : '', text].filter(Boolean).join('\n\n')
+  //         out = String(await pr.prompt?.(prompt) ?? '')
+  //       } else {
+  //         throw new Error('Local summarize API unavailable')
+  //       }
+  //       sendResponse({ ok: true, text: out })
+  //     } catch (e:any) { log('LOCAL summarize error:', e); sendResponse({ ok:false, error: e?.message || String(e) }) }
+  //   })(); return true
+  // }
+
+
+    // Local-only text ops (summarize / translate / rewrite)
+  if (msg.type === 'DACTI_SUMMARIZE_LOCAL') {
+    (async () => {
+      try {
+        const text = String(msg.text || '')
+        const mode = String(msg.mode || '')
+        const Summ = (self as any)?.Summarizer || (typeof ai !== 'undefined' ? (ai as any).summarizer : undefined)
+        const LM   = (self as any)?.LanguageModel || (typeof ai !== 'undefined' ? (ai as any).prompt     : undefined)
+        log('LOCAL summarize using', { Summ: !!Summ, LM: !!LM, mode })
+
+        let out = ''
+
+        // Découpage en chunks pour éviter QuotaExceededError
+        function chunkText(s: string, max = 6000): string[] {
+          const clean = String(s || '').replace(/\r/g,'').replace(/\t/g,' ').replace(/ {2,}/g,' ')
+          const paras = clean.split(/\n{2,}/)
+          const parts: string[] = []
+          let buf = ''
+          for (const p of paras) {
+            const add = buf ? (buf + '\n\n' + p) : p
+            if (add.length <= max) {
+              buf = add
+            } else {
+              if (buf) parts.push(buf)
+              if (p.length <= max) {
+                buf = p
+              } else {
+                for (let i = 0; i < p.length; i += max) parts.push(p.slice(i, i + max))
+                buf = ''
+              }
+            }
+          }
+          if (buf) parts.push(buf)
+          return parts
+        }
+
+        if (Summ && (Summ as any).create) {
+          // Summarizer local (gemini-nano) avec repli dynamique en cas de quota
+          const summarizeOne = async (s: string): Promise<string> => {
+            // Re-crée une session à chaque chunk pour éviter l'accumulation de contexte
+            const sm: any = await (Summ as any).create({ type: 'key-points', outputLanguage: 'en' })
+            return String(await sm.summarize?.(s) ?? '')
+          }
+
+          const trySummarizeDynamic = async (initialMax: number) => {
+            let maxChunk = initialMax
+            const MIN = 800
+
+            const processChunks = async (src: string, maxLen: number): Promise<string> => {
+              const chunks = chunkText(src, maxLen)
+              log('LOCAL summarize chunk plan', { chunks: chunks.length, maxLen })
+              const parts: string[] = []
+              for (let i = 0; i < chunks.length; i++) {
+                const piece = chunks[i]
+                let attempt = piece
+                let localMax = Math.min(maxLen, Math.max(MIN, piece.length))
+                // Boucle de réduction si le chunk seul dépasse encore le quota
+                while (true) {
+                  try {
+                    log('LOCAL summarize chunk', { index: i + 1, total: chunks.length, size: attempt.length })
+                    const t = await summarizeOne(attempt)
+                    if (t && t.trim()) parts.push(t.trim())
+                    break
+                  } catch (err: any) {
+                    const msg = String(err?.message || err || '')
+                    if (/quota|too\s+large/i.test(msg) && localMax > MIN) {
+                      // Réduire et re-chunker cette portion uniquement
+                      localMax = Math.max(MIN, Math.floor(localMax * 0.66))
+                      log('LOCAL summarize shrink chunk due to quota', { from: attempt.length, nextMax: localMax })
+                      const sub = chunkText(piece, localMax)
+                      // Remplace la stratégie: traiter chaque sous-partie séquentiellement
+                      for (const subpart of sub) {
+                        try {
+                          const t2 = await summarizeOne(subpart)
+                          if (t2 && t2.trim()) parts.push(t2.trim())
+                        } catch (e2: any) {
+                          const m2 = String(e2?.message || e2 || '')
+                          if (/quota|too\s+large/i.test(m2) && localMax > MIN) {
+                            // Descendre encore et re-injecter ces sous-parties
+                            const sub2 = chunkText(subpart, Math.max(MIN, Math.floor(localMax * 0.66)))
+                            for (const subsub of sub2) {
+                              const t3 = await summarizeOne(subsub).catch(() => '')
+                              if (t3 && t3.trim()) parts.push(t3.trim())
+                            }
+                          } else {
+                            throw e2
+                          }
+                        }
+                      }
+                      break
+                    } else {
+                      throw err
+                    }
+                  }
+                }
+              }
+              return parts.join('\n\n')
+            }
+
+            // 1ère passe
+            let merged = await processChunks(text, maxChunk)
+            // Compression finale si trop long
+            if (merged.length > maxChunk) {
+              const again = await processChunks(merged, Math.max(MIN, Math.floor(maxChunk * 0.8)))
+              if (again.trim()) merged = again
+            }
+            return merged
+          }
+
+          try {
+            out = await trySummarizeDynamic(5000)
+          } catch (e: any) {
+            if (/quota|too\s+large/i.test(String(e?.message || e))) {
+              log('LOCAL summarize retry with smaller dynamic chunks due to quota', e?.message || String(e))
+              out = await trySummarizeDynamic(3000)
+            } else {
+              throw e
+            }
+          }
+        } else if (LM && (LM as any).create) {
+          // Fallback local via ai.prompt
+          const pr: any = await (LM as any).create({ expectedInputs:[{type:'text'}], expectedOutputs:[{type:'text'}] })
+          const chunks = chunkText(text, 7000)
+          const partials: string[] = []
+          for (let i = 0; i < chunks.length; i++) {
+            const prompt = [
+              'Summarize the following text clearly as concise bullet points.',
+              (mode ? `Mode: ${mode}` : ''),
+              `Chunk ${i + 1}/${chunks.length}:`,
+              chunks[i]
+            ].filter(Boolean).join('\n\n')
+            const t = String(await pr.prompt?.(prompt) ?? '')
+            if (t.trim()) partials.push(t.trim())
+          }
+          out = partials.join('\n\n')
+          if (partials.length > 1) {
+            const mergePrompt =
+              `Merge and deduplicate the bullet points below into a concise summary (max 8 bullets). Return only the bullets.\n\n${out}`
+            const merged = String(await pr.prompt?.(mergePrompt) ?? '')
+            if (merged.trim()) out = merged.trim()
+          }
+        } else {
+          throw new Error('Local summarize API unavailable')
+        }
+
+        if (!out.trim()) { out = '(no summary produced by local model)' }
+        sendResponse({ ok: true, text: out })
+      } catch (e:any) {
+        log('LOCAL summarize error:', e)
+        sendResponse({ ok:false, error: e?.message || String(e) })
+      }
+    })(); return true
+  }
+
+  if (msg.type === 'DACTI_TRANSLATE_LOCAL') {
+    (async () => {
+      try {
+        const text = String(msg.text || '')
+        const target = String(msg.target || 'en')
+        const LM   = (self as any)?.LanguageModel || (typeof ai !== 'undefined' ? (ai as any).prompt     : undefined)
+        log('LOCAL translate using', { LM: !!LM, target })
+        if (!(LM && (LM as any).create)) throw new Error('Local translate API unavailable')
+        const pr: any = await (LM as any).create({ expectedInputs:[{type:'text'}], expectedOutputs:[{type:'text'}] })
+        const prompt = `Translate into ${target}. Return only the translation.\n\n${text}`
+        const out = String(await pr.prompt?.(prompt) ?? '')
+        sendResponse({ ok: true, text: out })
+      } catch (e:any) { log('LOCAL translate error:', e); sendResponse({ ok:false, error: e?.message || String(e) }) }
+    })(); return true
+  }
+
+  if (msg.type === 'DACTI_REWRITE_LOCAL') {
+    (async () => {
+      try {
+        const text = String(msg.text || '')
+        const style = String(msg.style || 'simplify')
+        const LM   = (self as any)?.LanguageModel || (typeof ai !== 'undefined' ? (ai as any).prompt     : undefined)
+        log('LOCAL rewrite using', { LM: !!LM, style })
+        if (!(LM && (LM as any).create)) throw new Error('Local rewrite API unavailable')
+        const pr: any = await (LM as any).create({ expectedInputs:[{type:'text'}], expectedOutputs:[{type:'text'}] })
+        const prompt = `Rewrite the text with style: ${style}. Return only the result.\n\n${text}`
+        const out = String(await pr.prompt?.(prompt) ?? '')
+        sendResponse({ ok: true, text: out })
+      } catch (e:any) { log('LOCAL rewrite error:', e); sendResponse({ ok:false, error: e?.message || String(e) }) }
+    })(); return true
+  }
+// Local text generation (offline) using on-device APIs
+if (msg.type === 'DACTI_GENERATE_LOCAL_TEXT') {
+  (async () => {
+    try {
+      const context = String(msg.context || '')
+      const task = String(msg.task || 'Write a concise paragraph based on the context.')
+      const Summ = (self as any)?.Summarizer || (typeof ai !== 'undefined' ? (ai as any).summarizer : undefined)
+      const LM   = (self as any)?.LanguageModel || (typeof ai !== 'undefined' ? (ai as any).prompt     : undefined)
+      let out = ''
+      if (LM && (LM as any).create) {
+        const pr: any = await (LM as any).create({ expectedInputs: [{ type: 'text' }], expectedOutputs: [{ type: 'text' }] })
+        const req = [
+          'You are a helpful writing assistant.',
+          'TASK:', task,
+          'CONTEXT:', context,
+          'Return only the final text (no explanations).'
+        ].join('\\n\\n')
+        out = String(await pr.prompt?.(req) ?? '')
+      } else if (Summ && (Summ as any).create) {
+        const sm: any = await (Summ as any).create({ type: 'key-points', outputLanguage: 'en' })
+        out = String(await sm.summarize?.(`${task}\\n\\n${context}`) ?? '')
+      } else {
+        throw new Error('Local text generation API unavailable')
+      }
+      sendResponse({ ok: true, text: out })
+    } catch (e: any) {
+      sendResponse({ ok: false, error: e?.message || String(e) })
+    }
+  })()
+  return true
+}
   // --- SYNC HANDLERS ---
   if (msg.type === 'DACTI_PROGRESS') {
     const r = ensurePanel()!
