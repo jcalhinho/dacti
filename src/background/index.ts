@@ -32,7 +32,7 @@ import { proofreadText } from '@/shared/ai/proofreader'
 import { writeFromContext } from '@/shared/ai/writer'
 
 // -----------------------------
-// Helpers to drive the in-page React panel (content script)
+// Helpers to drive the in-page panel (content script)
 // -----------------------------
 function openPanel(tabId: number | undefined, payload: { title: string; message: string }) {
   if (!tabId) return

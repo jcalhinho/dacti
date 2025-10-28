@@ -480,7 +480,7 @@ wrap.appendChild(stopBtn)
         localAvailable = false
         renderMode(false, true)
         setBadge(false, 'Local API unavailable')
-        showStatus('🚫 Mode local indisponible : API non disponible sur cet appareil/navigateur (voir exigences matérielles).')
+        showStatus('🚫 Local mode unavailable: API not available on this device/browser (see hardware requirements).')
         return false
       }
 
@@ -490,7 +490,7 @@ wrap.appendChild(stopBtn)
         localAvailable = false
         renderMode(false, true)
         setBadge(false, 'Local model needs user activation to download')
-        showStatus('⬇️ Modèle local prêt à être téléchargé. Clique sur « Summarize », « Translate » ou « Alt Images » pour autoriser le téléchargement, puis surveille la barre de progression.')
+        showStatus('⬇️ Local model is ready for download. Click "Summarize", "Translate", or "Alt Images" to authorize the download, then watch the progress bar.')
         return false
       }
 
@@ -500,7 +500,7 @@ wrap.appendChild(stopBtn)
         localAvailable = false
         renderMode(false, true)
         setBadge(false, 'Local API unavailable')
-        showStatus('🚫 Mode local indisponible : API `ai.summarizer`/`ai.prompt` absente. Passage en Cloud.\nAstuce : si vous souhaitez tester le local, vérifiez vos réglages Chrome et les flags (chrome://flags) pour activer la Prompt API / modèles on‑device, puis relancez le panneau.')
+        showStatus('🚫 Local mode unavailable: `ai.summarizer`/`ai.prompt` APIs are missing. Switching to Cloud.\nTip: To test local capabilities, check your Chrome settings and flags (chrome://flags) to enable the Prompt API / on-device models, then reopen the panel.')
         return false
       }
       showProgress(0)
@@ -547,7 +547,7 @@ wrap.appendChild(stopBtn)
         localAvailable = false
         setBadge(false, 'Local init failed')
         renderMode(false, true)
-        showStatus('⚠️ Échec de l\'initialisation du modèle local : ' + (e?.message || String(e)) + '\n→ Bascule automatique en mode Cloud.')
+        showStatus('⚠️ Local model initialization failed: ' + (e?.message || String(e)) + '\n→ Automatically switching to Cloud mode.')
         return false
       }
     }
@@ -959,7 +959,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
           throw new Error('Local summarize API unavailable')
         }
 
-        if (!out.trim()) { out = '(no summary produced by local model)' }
+        if (!out.trim()) { out = '(No summary produced by local model)' }
         sendResponse({ ok: true, text: out })
       } catch (e:any) {
         log('LOCAL summarize error:', e)
