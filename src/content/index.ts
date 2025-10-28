@@ -9,7 +9,6 @@
     btnSummarize: HTMLButtonElement
     btnTranslate: HTMLButtonElement
     btnRewrite: HTMLButtonElement
-    btnAlt: HTMLButtonElement
     btnWrite: HTMLButtonElement
     closeBtn: HTMLButtonElement
   } | null
@@ -320,12 +319,9 @@ wrap.appendChild(btn); wrap.appendChild(menu)
       { label:'Longer / more details', value:'rewrite', payload:{ style:'expand' } },
     ])
 
-    const btnAlt = h('button', 'btn', 'Alt Images') as HTMLButtonElement
-
     grid.appendChild(summarizeDD.wrap)
     grid.appendChild(translateDD.wrap)
     grid.appendChild(rewriteDD.wrap)
-    grid.appendChild(btnAlt)
     grid.appendChild(writeDD.wrap)
 
     const progressWrap = h('div','progressWrap') as HTMLDivElement
@@ -608,14 +604,13 @@ wrap.appendChild(stopBtn)
       chrome.storage.local.set({ dactiTheme: mode })
       applyTheme(mode)
     })
-function setActive(kind: 'summarize' | 'translate' | 'altimages' | 'write' | 'rewrite') {
+function setActive(kind: 'summarize' | 'translate' | 'write' | 'rewrite') {
   summarizeDD.btn.classList.toggle('active', kind === 'summarize')
   translateDD.btn.classList.toggle('active', kind === 'translate')
   rewriteDD.btn.classList.toggle('active', kind === 'rewrite')
-  btnAlt.classList.toggle('active', kind === 'altimages')
   writeDD.btn.classList.toggle('active', kind === 'write')
 }
-    const run = async (action: 'summarize' | 'translate' | 'altimages' | 'write' | 'rewrite', params?: any) => {
+    const run = async (action: 'summarize' | 'translate' | 'write' | 'rewrite', params?: any) => {
         setActive(action)
       startLoading()
       await detectLocalAvailability()
@@ -646,10 +641,8 @@ function setActive(kind: 'summarize' | 'translate' | 'altimages' | 'write' | 're
 
     function disable(v: boolean) {
       (summarizeDD.btn.disabled = v), (translateDD.btn.disabled = v), (rewriteDD.btn.disabled = v), (writeDD.btn.disabled = v)
-      btnAlt.disabled = v
     }
 
-btnAlt.addEventListener('click', () => { setActive('altimages'); run('altimages') })
     copyBtn.addEventListener('click', async () => {
       try { await navigator.clipboard.writeText(outEl.textContent || '') } catch {}
     })
@@ -688,7 +681,7 @@ btnAlt.addEventListener('click', () => { setActive('altimages'); run('altimages'
       run('summarize', { summarizeMode: m })
     })
     __buildingPanel = false
-  refs = { root, host, header, titleEl, outEl, localOnlyCheckbox: undefined as any, btnSummarize: summarizeDD.btn, btnTranslate: translateDD.btn, btnRewrite: rewriteDD.btn, btnAlt, btnWrite: writeDD.btn, closeBtn }
+  refs = { root, host, header, titleEl, outEl, localOnlyCheckbox: undefined as any, btnSummarize: summarizeDD.btn, btnTranslate: translateDD.btn, btnRewrite: rewriteDD.btn, btnWrite: writeDD.btn, closeBtn }
     return refs
   }
 
@@ -966,39 +959,6 @@ if (msg.type === 'DACTI_GENERATE_LOCAL_TEXT') {
 
   if (msg.type === 'DACTI_PANEL_OPEN') { setContent(msg.title, msg.message); return }
   if (msg.type === 'DACTI_PANEL_UPDATE') { setContent(msg.title, msg.message); return }
-
-  if (msg.type === 'DACTI_PANEL_ALTTABLE' && Array.isArray(msg.items)) {
-    const r = ensurePanel()!
-    const list = msg.items as Array<{ src:string; alt:string; tags:string[]; preview?:string }>
-    const html = ['<div class="alts">', ...list.map(raw => {
-      let alt = raw.alt || ''
-      let tags = Array.isArray(raw.tags) ? raw.tags : []
-      const fence = /```(?:json)?\s*[\s\S]*```/i
-      if (fence.test(alt)) {
-        try { const p = JSON.parse(alt.replace(/```(?:json)?\s*([\s\S]*?)```/i,'$1')); if (p?.alt) { alt = String(p.alt); if (Array.isArray(p.tags)) tags = p.tags } } catch {}
-      }
-      const safeSrc = (raw.preview||raw.src||'').replace(/\"/g,'&quot;')
-      let host = ''; try { host = new URL(raw.src).hostname } catch {}
-           const altText = (alt ? `<div class="altline"><strong>alt:</strong> ${alt.replace(/[<>]/g,'')}</div>` : '')
-      const tagsHtml = tags.length ? `<div class="alttagsScroll"><div class="alttags"><strong>tags:</strong> ${tags.join(', ')}</div></div>` : ''
-      const catHtml = (raw as any).category ? `<div class="alttags"><strong>cat:</strong> ${String((raw as any).category)}</div>` : ''
-      const toneHtml = (raw as any).tone ? `<div class="alttags"><strong>tone:</strong> ${String((raw as any).tone)}</div>` : ''
-      const srcLine = host ? `<div class="alttags" style="opacity:.7">${host}</div>` : ''
-      return `
-        <div class="altrow">
-          <img src="${safeSrc}" alt=""/>
-          <div class="altmeta">
-            ${altText}
-            ${tagsHtml}
-            ${catHtml}
-            ${toneHtml}
-          
-          </div>
-        </div>`
-    }), '</div>'].join('')
-    r.outEl.innerHTML = html
-    return
-  }
 
   if (msg.type === 'DACTI_STOP_SHOW' || msg.type === 'DACTI_STOP_HIDE') {
     const r = ensurePanel()!

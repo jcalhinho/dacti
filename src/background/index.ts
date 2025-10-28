@@ -13,24 +13,6 @@ function startTask(tabId: number) {
 function getTask(tabId: number) { return tasks.get(tabId) }
 function cancelTask(tabId: number) { const t = tasks.get(tabId); if (t) { t.canceled = true; try { t.abort.abort() } catch {} } }
 
-// Fetches an image URL and returns a data URL
-async function fetchImageAsDataURL(url: string): Promise<string | null> {
-  try {
-    const response = await fetch(url)
-    if (!response.ok) return null
-    const blob = await response.blob()
-    return new Promise<string>((resolve, reject) => {
-      const reader = new FileReader()
-      reader.onload = () => resolve(reader.result as string)
-      reader.onerror = reject
-      reader.readAsDataURL(blob)
-    })
-  } catch (e) {
-    log('fetchImageAsDataURL error:', e)
-    return null
-  }
-}
-
 chrome.runtime.onMessage.addListener((msg, sender) => {
   if (!msg || typeof msg !== 'object') return
   if (msg.type === 'DACTI_CANCEL') {
@@ -122,7 +104,6 @@ chrome.runtime.onInstalled.addListener(() => {
     chrome.contextMenus.create({ id: 'dacti-translate', title: 'DACTI • Translate selection', contexts: ['selection'] })
     chrome.contextMenus.create({ id: 'dacti-rewrite',   title: 'DACTI • Rewrite selection',   contexts: ['selection'] })
     chrome.contextMenus.create({ id: 'dacti-summarize', title: 'DACTI • Summarize selection', contexts: ['selection'] })
-    chrome.contextMenus.create({ id: 'dacti-alt-image', title: 'DACTI • Generate Alt Text for Image', contexts: ['image'] })
 
     // Read saved prefs
     const { dactiSummarizeMode, dactiTranslateTarget, dactiRewriteStyle } = await chrome.storage.local.get([
@@ -324,86 +305,6 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
       await cacheSet(key, out)
       if (getTask(tab?.id || -1)?.canceled) return
       return updatePanel(tab?.id, { message: String(out).slice(0,5000) })
-    }
-
-    if (info.menuItemId === 'dacti-alt-image' && info.srcUrl) {
-      const tabId = tab?.id
-      if (!tabId) return
-      await openPanel(tabId, { title: 'DACTI', message: '' })
-      loading(tabId, true)
-      const src = info.srcUrl
-      log('alt-image single', { src, localOnly })
-
-      const dataUrl = await fetchImageAsDataURL(src)
-      if (!dataUrl) {
-        return updatePanel(tab?.id, { message: 'Error: Could not fetch the image.' })
-      }
-
-      let altText = ''
-      if (localOnly) {
-        const [{ result }] = await chrome.scripting.executeScript({
-          target: { tabId },
-          func: async (dataUrl: string) => {
-            try {
-              const resp = await fetch(dataUrl)
-              const blob = await resp.blob()
-              const LM = (self as any)?.LanguageModel || ((self as any).ai?.prompt)
-              if (!LM?.create) throw new Error('Local multimodal API unavailable')
-              const prompt = await LM.create({ multimodal: true, model: 'gemini-nano' })
-              const res = await prompt.generate({
-                image: blob,
-                instruction: 'Describe the image in a single, concise sentence (max 120 characters). Return only the description.'
-              })
-              return { ok: true, alt: String(res ?? '').slice(0, 120) }
-            } catch (e: any) {
-              return { ok: false, error: e.message || String(e) }
-            }
-          },
-          args: [dataUrl]
-        })
-        if (result?.ok) {
-          altText = result.alt
-        } else {
-          altText = `(Local AI Error: ${result?.error || 'Unknown error'})`
-        }
-      } else {
-        const base64 = dataUrl.split(',')[1] || ''
-        const { dactiProxyUrl, dactiProxyToken } = await chrome.storage.local.get(['dactiProxyUrl','dactiProxyToken'])
-        const proxy = String(dactiProxyUrl || '').replace(/\/$/, '')
-        let tags: string[] = []
-
-        if (proxy) {
-          const prompt = 'Return STRICT JSON: {"alt":"...","tags":["a","b","c"],"category":"...","tone":"..."}.\nAlt <=120 chars, objective, non-biased.'
-          const extId = (typeof chrome !== 'undefined' && chrome?.runtime?.id) ? chrome.runtime.id : ''
-          const r = await fetch(`${proxy}/generate-multi`, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              ...(dactiProxyToken ? { Authorization: `Bearer ${dactiProxyToken}` } : {}),
-              ...(extId ? { 'x-dacti-ext-id': extId } : {}),
-            },
-            body: JSON.stringify({ prompt, imageBase64: base64, mimeType: dataUrl.split(';')[0].slice(5) || 'image/png' }),
-            signal,
-          })
-          if (r.ok) {
-            const { text } = await r.json() as any
-            const cleaned = stripFences(text)
-            try {
-              const p = JSON.parse(cleaned)
-              if (p?.alt) altText = String(p.alt).slice(0,120)
-              if (Array.isArray(p?.tags)) tags = p.tags
-            } catch { altText = cleaned.slice(0,120) }
-          }
-        } else {
-          // Legacy fallback
-          const prompt = 'You are an alt-text generator. Respond ONLY with JSON of the form {"alt":"...","tags":["a","b","c"]}. Alt <=120 chars.'
-          const json = await callGeminiApi(`${prompt}\n\nIMAGE_BASE64:\n${base64}`, { signal })
-          try { const p = JSON.parse(stripFences(json)); if (p?.alt) { altText = String(p.alt).slice(0,120); tags = Array.isArray(p.tags)?p.tags:[] } else { altText = stripFences(json).slice(0,120) } } catch { altText = stripFences(json).slice(0,120) }
-        }
-      }
-
-      if (getTask(tab?.id || -1)?.canceled) return
-      return updatePanel(tab?.id, { message: `**Alt Text:**\n${altText}` })
     }
   } catch (e: any) {
     await updatePanel(tab?.id, { title: 'DACTI', message: e?.message ? String(e.message) : String(e) })
@@ -624,117 +525,6 @@ chrome.runtime.onMessage.addListener(async (msg, sender) => {
         await cacheSet(key, out)
         if (getTask(tabId)?.canceled) { stopToggle(tabId, false); return }
         return updatePanel(tabId, { message: String(out).slice(0, 5000) })
-      }
-
-      if (msg.action === 'altimages') {
-        await openPanel(tabId, { title: 'DACTI', message: '' })
-        loading(tabId, true)
-        const [{ result: urls }] = await chrome.scripting.executeScript({
-          target: { tabId },
-          func: () => Array.from(document.images).map(im => im.currentSrc || im.src).filter(Boolean)
-        })
-        const uniq = Array.from(new Set((urls || []) as string[])).slice(0, 24)
-        log('altimages found', uniq.length, 'images', { localOnly })
-        if (!uniq.length) return updatePanel(tabId, { message: 'No images found on this page.' })
-
-        const items: Array<{ src:string; alt:string; tags:string[]; preview?:string; category?: string; tone?: string }> = []
-        let i = 0
-        for (const src of uniq) {
-          i++
-          log('altimages processing', i, '/', uniq.length, src)
-          progress(tabId, i/uniq.length)
-          const dataUrl = await fetchImageAsDataURL(src)
-          if (!dataUrl) {
-            items.push({ src, alt: '(Could not fetch image)', tags: [] })
-            continue
-          }
-
-          try {
-            if (localOnly) {
-              const [{ result }] = await chrome.scripting.executeScript({
-                target: { tabId },
-                func: async (dataUrl: string) => {
-                  try {
-                    const resp = await fetch(dataUrl)
-                    const blob = await resp.blob()
-                    const LM = (self as any)?.LanguageModel || ((self as any).ai?.prompt)
-                    if (!LM?.create) throw new Error('Local multimodal API unavailable')
-                    const prompt = await LM.create({ multimodal: true, model: 'gemini-nano' })
-                    const res = await prompt.generate({
-                      image: blob,
-                      instruction: 'Describe the image in a single, concise sentence (max 120 characters). Return only the description.'
-                    })
-                    return { ok: true, alt: String(res ?? '').slice(0, 120) }
-                  } catch (e: any) {
-                    return { ok: false, error: e.message || String(e) }
-                  }
-                },
-                args: [dataUrl]
-              })
-              if (result?.ok) {
-                items.push({ src, alt: result.alt, tags: [], preview: dataUrl })
-              } else {
-                items.push({ src, alt: `(Local AI Error: ${result?.error})`, tags: [], preview: dataUrl })
-              }
-            } else {
-              const base64 = dataUrl.split(',')[1] || ''
-              let alt = '', tags: string[] = []
-              const { dactiProxyUrl, dactiProxyToken } = await chrome.storage.local.get(['dactiProxyUrl','dactiProxyToken'])
-              const proxy = String(dactiProxyUrl || '').replace(/\/$/, '')
-
-              if (proxy) {
-                const prompt = 'Return STRICT JSON: {"alt":"...","tags":["a","b","c"],"category":"...","tone":"..."}.\nAlt <=120 chars, objective, non-biased.'
-                const extId = (typeof chrome !== 'undefined' && chrome?.runtime?.id) ? chrome.runtime.id : ''
-                const r = await fetch(`${proxy}/generate-multi`, {
-                  method: 'POST',
-                  headers: {
-                    'Content-Type': 'application/json',
-                    ...(dactiProxyToken ? { Authorization: `Bearer ${dactiProxyToken}` } : {}),
-                    ...(extId ? { 'x-dacti-ext-id': extId } : {}),
-                  },
-                  body: JSON.stringify({ prompt, imageBase64: base64, mimeType: dataUrl.split(';')[0].slice(5) || 'image/png' }),
-                  signal,
-                })
-                if (r.ok) {
-                  const { text } = await r.json() as any
-                  const cleaned = stripFences(text)
-                  try {
-                    const p = JSON.parse(cleaned)
-                    if (p?.alt) alt = String(p.alt).slice(0,120)
-                    if (Array.isArray(p?.tags)) tags = p.tags
-                    items.push({ src, alt, tags, preview: dataUrl, category: p?.category, tone: p?.tone })
-                    continue
-                  } catch {
-                    alt = cleaned.slice(0,120)
-                  }
-                }
-              } else {
-                // Legacy fallback
-                const prompt = 'You are an alt-text generator. Respond ONLY with JSON of the form {"alt":"...","tags":["a","b","c"]}. Alt <=120 chars.'
-                const json = await callGeminiApi(`${prompt}\n\nIMAGE_BASE64:\n${base64}`, { signal })
-                try {
-                  const p = JSON.parse(stripFences(json));
-                  if (p?.alt) {
-                    alt = String(p.alt).slice(0,120);
-                    tags = Array.isArray(p.tags)?p.tags:[]
-                  } else {
-                    alt = stripFences(json).slice(0,120)
-                  }
-                } catch {
-                  alt = stripFences(json).slice(0,120)
-                }
-              }
-              items.push({ src, alt, tags, preview: dataUrl })
-            }
-          } catch (e) {
-            log('altimages error for', src, e)
-            items.push({ src, alt: `(Error: ${e.message})`, tags: [] })
-          }
-          if (getTask(tabId)?.canceled) { stopToggle(tabId, false); return }
-        }
-        progress(tabId, 1)
-        sendAltTable(tabId, items)
-        return
       }
 
       if (msg.action === 'write') {
