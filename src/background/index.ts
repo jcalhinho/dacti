@@ -30,6 +30,7 @@ import { translateText } from '@/shared/ai/translator'
 import { summarizePage } from '@/shared/ai/summarizer'
 import { proofreadText } from '@/shared/ai/proofreader'
 import { writeFromContext } from '@/shared/ai/writer'
+import { callGeminiApi } from '@/shared/ai/gemini-api'
 
 // -----------------------------
 // Helpers to drive the in-page panel (content script)
@@ -514,7 +515,6 @@ chrome.runtime.onMessage.addListener(async (msg, sender) => {
           }
           if (!out || /input\s+is\s+undefined/i.test(String(out))) {
             try {
-              const { callGeminiApi } = await import('@/shared/ai/gemini-api')
               const m = String(params.summarizeMode || 'bullets')
               const prompt = (
                 m === 'tldr'     ? `TL;DR in 1–2 sentences.\n\n${masked}` :
@@ -573,6 +573,33 @@ if (localOnly) {
 await cacheSet(key, out)
 if (getTask(tabId)?.canceled) { stopToggle(tabId, false); return }
 return updatePanel(tabId, { message: String(out).slice(0, 5000) })
+      }
+
+      if (msg.action === 'proofread') {
+        await openPanel(tabId, { title: 'DACTI', message: '' })
+        loading(tabId, true)
+        const text = String(params.text || '')
+        if (!text.trim()) return updatePanel(tabId, { message: 'Empty text.' })
+
+        const key = 'pr:' + hash(text + Number(localOnly))
+        const cached = await cacheGet(key)
+        if (cached) return updatePanel(tabId, { message: String(cached).slice(0,5000) })
+
+        const input = (!localOnly && dactiMaskPII) ? maskPII(text) : text
+        log('PATH', localOnly ? 'LOCAL' : 'CLOUD', { action: 'proofread' })
+
+        let out: string
+        if (localOnly) {
+          // Proofreading is not available in local mode, fallback to cloud
+          out = await proofreadText(input, { localOnly: false, signal })
+        } else {
+          out = await proofreadText(input, { localOnly, signal })
+        }
+
+        log('proofread done', { localOnly, len: out?.length })
+        await cacheSet(key, out)
+        if (getTask(tabId)?.canceled) { stopToggle(tabId, false); return }
+        return updatePanel(tabId, { message: String(out).slice(0, 5000) })
       }
     }
   } catch (e: any) {
