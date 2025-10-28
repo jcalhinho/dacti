@@ -304,7 +304,6 @@ wrap.appendChild(btn); wrap.appendChild(menu)
       { label:'→ Português', value:'translate', payload:{ translateTarget:'pt' } },
       { label:'Auto → English', value:'translate', payload:{ translateTarget:'auto' } },
     ])
-    translateDD.btn.title = 'Select text on the page to use this feature.'
     const writeDD = makeDropdown('Write', [
       { label:'Concise email (EN)', value:'write', payload:{ writeType:'email' } },
       { label:'LinkedIn post', value:'write', payload:{ writeType:'linkedin' } },
@@ -319,7 +318,6 @@ wrap.appendChild(btn); wrap.appendChild(menu)
       { label:'Shorter / concise', value:'rewrite', payload:{ style:'shorten' } },
       { label:'Longer / more details', value:'rewrite', payload:{ style:'expand' } },
     ])
-    rewriteDD.btn.title = 'Select text on the page to use this feature.'
 
     grid.appendChild(summarizeDD.wrap)
     grid.appendChild(translateDD.wrap)
@@ -691,7 +689,20 @@ function setActive(kind: 'summarize' | 'translate' | 'write' | 'rewrite') {
   function setContent(title?: string, message?: string) {
     const r = ensurePanel()!
     if (title) r.titleEl.textContent = title
-    if (typeof message === 'string') r.outEl.textContent = message
+    if (typeof message === 'string') {
+      r.outEl.innerHTML = renderMarkdown(message)
+    }
+  }
+
+  function renderMarkdown(text: string): string {
+    if (!text) return ''
+    return text
+      .replace(/\*\*(.*?)\*\*/g, '<b>$1</b>') // Bold
+      .replace(/\*(.*?)\*/g, '<i>$1</i>')   // Italic
+      .replace(/^[\s]*[-*]\s(.*)/gm, '<li>$1</li>') // Bullets
+      .replace(/(<li>.*<\/li>)/gs, '<ul>$1</ul>') // Wrap consecutive LIs in a UL
+      .replace(/<\/ul>\s*<ul>/g, '') // Merge adjacent ULs
+      .replace(/\n/g, '<br />') // Newlines
   }
 
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {

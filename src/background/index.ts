@@ -26,15 +26,6 @@ chrome.runtime.onMessage.addListener((msg, sender) => {
 })
 function stripFences(s: string): string { const m = String(s||'').match(/```(?:json)?\s*([\s\S]*?)```/i); return (m?m[1]:String(s||'')).trim() }
 
-function cleanMarkdown(text: string): string {
-  if (!text) return ''
-  return text
-    .replace(/\*\*(.*?)\*\*/g, '$1') // Bold
-    .replace(/\*(.*?)\*/g, '$1')   // Italic
-    .replace(/^[\s]*[-*]\s/gm, '') // Bullets
-    .trim()
-}
-
 import { rewriteText } from '@/shared/ai/rewriter'
 import { translateText } from '@/shared/ai/translator'
 import { summarizePage } from '@/shared/ai/summarizer'
@@ -242,7 +233,7 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
 
       await cacheSet(key, out)
       if (getTask(tab?.id || -1)?.canceled) return
-      return updatePanel(tab?.id, { message: cleanMarkdown(String(out)).slice(0,5000) })
+      return updatePanel(tab?.id, { message: String(out).slice(0,5000) })
     }
 
     if ((info.menuItemId === 'dacti-rewrite' || String(info.menuItemId).startsWith('dacti-rw-')) && info.selectionText) {
@@ -278,7 +269,7 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
 
       await cacheSet(key, out)
       if (getTask(tab?.id || -1)?.canceled) return
-      return updatePanel(tab?.id, { message: cleanMarkdown(String(out)).slice(0,5000) })
+      return updatePanel(tab?.id, { message: String(out).slice(0,5000) })
     }
 
     if ((info.menuItemId === 'dacti-summarize' || String(info.menuItemId).startsWith('dacti-sum-')) && info.selectionText) {
@@ -314,7 +305,7 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
 
       await cacheSet(key, out)
       if (getTask(tab?.id || -1)?.canceled) return
-      return updatePanel(tab?.id, { message: cleanMarkdown(String(out)).slice(0,5000) })
+      return updatePanel(tab?.id, { message: String(out).slice(0,5000) })
     }
   } catch (e: any) {
     await updatePanel(tab?.id, { title: 'DACTI', message: e?.message ? String(e.message) : String(e) })
@@ -368,7 +359,7 @@ chrome.commands?.onCommand.addListener(async (command) => {
 
     await cacheSet(key, out)
     if (getTask(tab.id)?.canceled) { stopToggle(tab.id, false); return }
-    updatePanel(tab.id, { message: cleanMarkdown(String(out)).slice(0,5000) })
+    updatePanel(tab.id, { message: String(out).slice(0,5000) })
   } catch (e) {
     try {
       const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
@@ -433,10 +424,14 @@ chrome.runtime.onMessage.addListener(async (msg, sender) => {
         await openPanel(tabId, { title: 'DACTI', message: '' })
         loading(tabId, true)
         const fromPanel = params?.source === 'panel' && typeof params?.text === 'string'
-        const sel: string = fromPanel
+        let sel: string = fromPanel
           ? String(params.text)
           : (await chrome.scripting.executeScript({ target: { tabId }, func: () => window.getSelection()?.toString() || '' }))[0].result
-        if (!sel) return updatePanel(tabId, { message: 'Empty selection.' })
+        if (!sel) {
+          const [{ result }] = await chrome.scripting.executeScript({ target: { tabId }, func: () => ({ title: document.title, text: document.body?.innerText?.slice(0, 120000) || '' }) })
+          sel = `${result.title}\n\n${result.text}`
+        }
+        if (!sel.trim()) return updatePanel(tabId, { message: 'The page is empty or no text was selected.' })
         const target = String(params.translateTarget || 'en')
         const key = 'tr:' + hash(sel + '|' + target + Number(localOnly))
         const cached = await cacheGet(key)
@@ -454,7 +449,7 @@ chrome.runtime.onMessage.addListener(async (msg, sender) => {
         log('translate done', { localOnly, len: out?.length })
         await cacheSet(key, out)
         if (getTask(tabId)?.canceled) { stopToggle(tabId, false); return }
-        return updatePanel(tabId, { message: cleanMarkdown(String(out)).slice(0,5000) })
+        return updatePanel(tabId, { message: String(out).slice(0,5000) })
       }
 
       if (msg.action === 'rewrite') {
@@ -462,13 +457,17 @@ chrome.runtime.onMessage.addListener(async (msg, sender) => {
         await openPanel(tabId, { title: 'DACTI', message: '' })
         loading(tabId, true)
         const fromPanel = params?.source === 'panel' && typeof params?.text === 'string'
-        const sel: string = fromPanel
+        let sel: string = fromPanel
           ? String(params.text)
           : (await chrome.scripting.executeScript({ target: { tabId }, func: () => window.getSelection()?.toString() || '' }))[0].result
-        if (!sel) return updatePanel(tabId, { message: 'Empty selection.' })
+        if (!sel) {
+          const [{ result }] = await chrome.scripting.executeScript({ target: { tabId }, func: () => ({ title: document.title, text: document.body?.innerText?.slice(0, 120000) || '' }) })
+          sel = `${result.title}\n\n${result.text}`
+        }
+        if (!sel.trim()) return updatePanel(tabId, { message: 'The page is empty or no text was selected.' })
         const key = 'rw:' + hash(sel + '|' + style + Number(localOnly))
         const cached = await cacheGet(key)
-        if (cached) return updatePanel(tabId, { message: cleanMarkdown(String(cached)).slice(0,5000) })
+        if (cached) return updatePanel(tabId, { message: String(cached).slice(0,5000) })
         const input = (!localOnly && dactiMaskPII) ? maskPII(sel) : sel
       log('PATH', localOnly ? 'LOCAL' : 'CLOUD', { action: 'rewrite' })
         let out: string
@@ -482,7 +481,7 @@ chrome.runtime.onMessage.addListener(async (msg, sender) => {
         log('rewrite done', { localOnly, len: out?.length })
         await cacheSet(key, out)
         if (getTask(tabId)?.canceled) { stopToggle(tabId, false); return }
-        return updatePanel(tabId, { message: cleanMarkdown(String(out)).slice(0,5000) })
+        return updatePanel(tabId, { message: String(out).slice(0,5000) })
       }
 
       if (msg.action === 'summarize') {
@@ -501,7 +500,7 @@ chrome.runtime.onMessage.addListener(async (msg, sender) => {
         log('PATH', localOnly ? 'LOCAL' : 'CLOUD', { action: 'summarize', mode: params?.summarizeMode })
         const key = 'sm:' + hash(masked + String(params.summarizeMode || '') + Number(localOnly))
         const cached = await cacheGet(key)
-        if (cached) return updatePanel(tabId, { message: cleanMarkdown(String(cached)).slice(0,5000) })
+        if (cached) return updatePanel(tabId, { message: String(cached).slice(0,5000) })
         let out: string
         if (localOnly) {
           const resp: any = await chrome.tabs.sendMessage(tabId, { type: 'DACTI_SUMMARIZE_LOCAL', text: masked, mode: params.summarizeMode })
@@ -535,7 +534,7 @@ chrome.runtime.onMessage.addListener(async (msg, sender) => {
         log('summarize done', { localOnly, len: out?.length })
         await cacheSet(key, out)
         if (getTask(tabId)?.canceled) { stopToggle(tabId, false); return }
-        return updatePanel(tabId, { message: cleanMarkdown(String(out)).slice(0, 5000) })
+        return updatePanel(tabId, { message: String(out).slice(0, 5000) })
       }
 
       if (msg.action === 'write') {
@@ -560,7 +559,7 @@ chrome.runtime.onMessage.addListener(async (msg, sender) => {
         }
         const key = 'wr:' + hash(input + wt + Number(localOnly))
         const cached = await cacheGet(key)
-        if (cached) return updatePanel(tabId, { message: cleanMarkdown(String(cached)).slice(0,5000) })
+        if (cached) return updatePanel(tabId, { message: String(cached).slice(0,5000) })
       log('PATH', localOnly ? 'LOCAL' : 'CLOUD', { action: 'write' })
 let out: string
 if (localOnly) {
@@ -576,7 +575,7 @@ if (localOnly) {
 }
 await cacheSet(key, out)
 if (getTask(tabId)?.canceled) { stopToggle(tabId, false); return }
-return updatePanel(tabId, { message: cleanMarkdown(String(out)).slice(0, 5000) })
+return updatePanel(tabId, { message: String(out).slice(0, 5000) })
       }
     }
   } catch (e: any) {
