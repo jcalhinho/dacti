@@ -10,6 +10,7 @@
     btnTranslate: HTMLButtonElement
     btnRewrite: HTMLButtonElement
     btnWrite: HTMLButtonElement
+    btnProofread: HTMLButtonElement
     closeBtn: HTMLButtonElement
   } | null
 
@@ -74,7 +75,7 @@
 }
       .btn:active { transform: translateY(1px); }
       .btn:disabled { opacity:.6; cursor:default; box-shadow:none; }
-      .out { flex:1 1 auto; margin:12px; margin-top:0; border:1px solid var(--border); border-radius:12px; background:var(--card); padding:10px; overflow:auto; white-space:pre-wrap; min-height:60px; font-size:12px; }
+      .out { flex:1 1 auto; margin:12px; margin-top:0; border:1px solid var(--border); border-radius:12px; background:var(--card); padding:10px; overflow:auto; white-space:pre-wrap; min-height:60px; font-size:12px; -webkit-user-modify: read-write-plaintext-only; }
       .toolbar { display:flex; gap:8px; padding:8px 12px; border-top:1px solid var(--border); background:var(--subtle); border-bottom-left-radius:20px; border-bottom-right-radius:20px; }
       .small { font-size:12px; display:flex; align-items:center; gap:6px; color:var(--muted); }
       .badge { font-size:11px; padding:2px 6px; border:1px solid var(--badge-border); border-radius:999px; color:var(--accent); background: var(--badge-bg); }
@@ -319,16 +320,20 @@ wrap.appendChild(btn); wrap.appendChild(menu)
       { label:'Longer / more details', value:'rewrite', payload:{ style:'expand' } },
     ])
 
+    const btnProofread = h('button', 'btn', 'Proofread') as HTMLButtonElement
+
     grid.appendChild(summarizeDD.wrap)
     grid.appendChild(translateDD.wrap)
     grid.appendChild(rewriteDD.wrap)
     grid.appendChild(writeDD.wrap)
+    grid.appendChild(btnProofread)
 
     const progressWrap = h('div','progressWrap') as HTMLDivElement
     const progressBar = h('div','progressBar') as HTMLDivElement
     progressWrap.appendChild(progressBar)
 
     const outEl = h('div', 'out') as HTMLDivElement
+    outEl.contentEditable = 'true'
     outEl.textContent = 'Initializing AI... Please wait.'
 
     // --- Loading animation (cycles one,two,three,four.webp from /public, robustly resolving URLs and bypassing CSP)
@@ -605,13 +610,14 @@ wrap.appendChild(stopBtn)
       chrome.storage.local.set({ dactiTheme: mode })
       applyTheme(mode)
     })
-function setActive(kind: 'summarize' | 'translate' | 'write' | 'rewrite') {
+function setActive(kind: 'summarize' | 'translate' | 'write' | 'rewrite' | 'proofread') {
   summarizeDD.btn.classList.toggle('active', kind === 'summarize')
   translateDD.btn.classList.toggle('active', kind === 'translate')
   rewriteDD.btn.classList.toggle('active', kind === 'rewrite')
   writeDD.btn.classList.toggle('active', kind === 'write')
+  btnProofread.classList.toggle('active', kind === 'proofread')
 }
-    const run = async (action: 'summarize' | 'translate' | 'write' | 'rewrite', params?: any) => {
+    const run = async (action: 'summarize' | 'translate' | 'write' | 'rewrite' | 'proofread', params?: any) => {
         setActive(action)
       startLoading()
       await detectLocalAvailability()
@@ -642,7 +648,14 @@ function setActive(kind: 'summarize' | 'translate' | 'write' | 'rewrite') {
 
     function disable(v: boolean) {
       (summarizeDD.btn.disabled = v), (translateDD.btn.disabled = v), (rewriteDD.btn.disabled = v), (writeDD.btn.disabled = v)
+      btnProofread.disabled = v
     }
+
+    btnProofread.addEventListener('click', () => {
+      const text = outEl.innerText
+      if (!text.trim()) return
+      run('proofread', { text })
+    })
 
     copyBtn.addEventListener('click', async () => {
       try { await navigator.clipboard.writeText(outEl.textContent || '') } catch {}
@@ -682,7 +695,7 @@ function setActive(kind: 'summarize' | 'translate' | 'write' | 'rewrite') {
       run('summarize', { summarizeMode: m })
     })
     __buildingPanel = false
-  refs = { root, host, header, titleEl, outEl, localOnlyCheckbox: undefined as any, btnSummarize: summarizeDD.btn, btnTranslate: translateDD.btn, btnRewrite: rewriteDD.btn, btnWrite: writeDD.btn, closeBtn }
+  refs = { root, host, header, titleEl, outEl, localOnlyCheckbox: undefined as any, btnSummarize: summarizeDD.btn, btnTranslate: translateDD.btn, btnRewrite: rewriteDD.btn, btnWrite: writeDD.btn, btnProofread, closeBtn }
     return refs
   }
 

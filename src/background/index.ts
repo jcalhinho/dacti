@@ -577,6 +577,33 @@ await cacheSet(key, out)
 if (getTask(tabId)?.canceled) { stopToggle(tabId, false); return }
 return updatePanel(tabId, { message: String(out).slice(0, 5000) })
       }
+
+      if (msg.action === 'proofread') {
+        await openPanel(tabId, { title: 'DACTI', message: '' })
+        loading(tabId, true)
+        const text = String(params.text || '')
+        if (!text.trim()) return updatePanel(tabId, { message: 'Empty text.' })
+
+        const key = 'pr:' + hash(text + Number(localOnly))
+        const cached = await cacheGet(key)
+        if (cached) return updatePanel(tabId, { message: String(cached).slice(0,5000) })
+
+        const input = (!localOnly && dactiMaskPII) ? maskPII(text) : text
+        log('PATH', localOnly ? 'LOCAL' : 'CLOUD', { action: 'proofread' })
+
+        let out: string
+        if (localOnly) {
+          // Proofreading is not available in local mode, fallback to cloud
+          out = await proofreadText(input, { localOnly: false, signal })
+        } else {
+          out = await proofreadText(input, { localOnly, signal })
+        }
+
+        log('proofread done', { localOnly, len: out?.length })
+        await cacheSet(key, out)
+        if (getTask(tabId)?.canceled) { stopToggle(tabId, false); return }
+        return updatePanel(tabId, { message: String(out).slice(0, 5000) })
+      }
     }
   } catch (e: any) {
     log('panel action error', msg?.action, e?.message)
