@@ -766,7 +766,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
 
         let out = ''
 
-        // Découpage en chunks pour éviter QuotaExceededError
+        // Split into chunks to avoid QuotaExceededError
         function chunkText(s: string, max = 6000): string[] {
           const clean = String(s || '').replace(/\r/g,'').replace(/\t/g,' ').replace(/ {2,}/g,' ')
           const paras = clean.split(/\n{2,}/)
@@ -791,9 +791,9 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
         }
 
         if (Summ && (Summ as any).create) {
-          // Summarizer local (gemini-nano) avec repli dynamique en cas de quota
+          // Local summarizer (gemini-nano) with dynamic fallback for quota errors
           const summarizeOne = async (s: string): Promise<string> => {
-            // Re-crée une session à chaque chunk pour éviter l'accumulation de contexte
+            // Re-create a session for each chunk to avoid context accumulation
             const sm: any = await (Summ as any).create({ type: 'key-points', outputLanguage: 'en' })
             return String(await sm.summarize?.(s) ?? '')
           }
@@ -810,7 +810,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
                 const piece = chunks[i]
                 let attempt = piece
                 let localMax = Math.min(maxLen, Math.max(MIN, piece.length))
-                // Boucle de réduction si le chunk seul dépasse encore le quota
+                // Reduction loop if the chunk itself still exceeds the quota
                 while (true) {
                   try {
                     log('LOCAL summarize chunk', { index: i + 1, total: chunks.length, size: attempt.length })
@@ -820,11 +820,11 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
                   } catch (err: any) {
                     const msg = String(err?.message || err || '')
                     if (/quota|too\s+large/i.test(msg) && localMax > MIN) {
-                      // Réduire et re-chunker cette portion uniquement
+                      // Reduce and re-chunk this portion only
                       localMax = Math.max(MIN, Math.floor(localMax * 0.66))
                       log('LOCAL summarize shrink chunk due to quota', { from: attempt.length, nextMax: localMax })
                       const sub = chunkText(piece, localMax)
-                      // Remplace la stratégie: traiter chaque sous-partie séquentiellement
+                       // Replace the strategy: process each sub-part sequentially
                       for (const subpart of sub) {
                         try {
                           const t2 = await summarizeOne(subpart)
@@ -832,7 +832,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
                         } catch (e2: any) {
                           const m2 = String(e2?.message || e2 || '')
                           if (/quota|too\s+large/i.test(m2) && localMax > MIN) {
-                            // Descendre encore et re-injecter ces sous-parties
+                             // Go down further and re-inject these sub-parts
                             const sub2 = chunkText(subpart, Math.max(MIN, Math.floor(localMax * 0.66)))
                             for (const subsub of sub2) {
                               const t3 = await summarizeOne(subsub).catch(() => '')
@@ -853,9 +853,9 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
               return parts.join('\n\n')
             }
 
-            // 1ère passe
+            // First pass
             let merged = await processChunks(text, maxChunk)
-            // Compression finale si trop long
+            // Final compression if too long
             if (merged.length > maxChunk) {
               const again = await processChunks(merged, Math.max(MIN, Math.floor(maxChunk * 0.8)))
               if (again.trim()) merged = again
@@ -874,7 +874,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
             }
           }
         } else if (LM && (LM as any).create) {
-          // Fallback local via ai.prompt
+          // Local fallback via ai.prompt
           const pr: any = await (LM as any).create({ expectedInputs:[{type:'text'}], expectedOutputs:[{type:'text'}] })
           const chunks = chunkText(text, 7000)
           const partials: string[] = []

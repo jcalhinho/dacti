@@ -25,7 +25,6 @@ chrome.runtime.onMessage.addListener((msg, sender) => {
   }
 })
 function stripFences(s: string): string { const m = String(s||'').match(/```(?:json)?\s*([\s\S]*?)```/i); return (m?m[1]:String(s||'')).trim() }
-
 import { rewriteText } from '@/shared/ai/rewriter'
 import { translateText } from '@/shared/ai/translator'
 import { summarizePage } from '@/shared/ai/summarizer'
@@ -517,8 +516,7 @@ chrome.runtime.onMessage.addListener(async (msg, sender) => {
           if (!out || /input\s+is\s+undefined/i.test(String(out))) {
             try {
               const m = String(params.summarizeMode || 'bullets')
-              const basePrompt = "Return only plain text, no markdown or special formatting. "
-              const prompt = basePrompt + (
+              const prompt = (
                 m === 'tldr'     ? `TL;DR in 1–2 sentences.\n\n${masked}` :
                 m === 'eli5'     ? `Explain simply (ELI5). Use short sentences.\n\n${masked}` :
                 m === 'sections' ? `Summarize by sections with H2/H3 headings.\n\n${masked}` :
@@ -547,15 +545,14 @@ chrome.runtime.onMessage.addListener(async (msg, sender) => {
           const [{ result: ctxRaw }] = await chrome.scripting.executeScript({ target: { tabId }, func: () => (document.title + "\n\n" + (document.body?.innerText?.slice(0, 5000) || '')) })
           ctx = String(ctxRaw || '')
         }
-        const input = (!localOnly && dactiMaskPII) ? maskPII(ctx) : input
+        const input = (!localOnly && dactiMaskPII) ? maskPII(ctx) : ctx
         const wt = String(params.writeType || 'email')
-        const basePrompt = "Return only plain text, no markdown or special formatting. "
         const map: Record<string,string> = {
-          email: basePrompt + 'Draft a concise email (400-600 words) in English.',
-          linkedin: basePrompt + 'Write a professional LinkedIn post (300-400 words) about the context. Keep it approachable and clear.',
-          tweet: basePrompt + 'Write a short social post (max 1500 chars) with a friendly tone.',
-          minutes: basePrompt + 'Write meeting minutes: agenda, key decisions, action items with owners.',
-          commit: basePrompt + 'Write a conventional commit message summarizing the changes (type(scope): subject).',
+          email: 'Draft a concise email (400-600 words) in English.',
+          linkedin: 'Write a professional LinkedIn post (300-400 words) about the context. Keep it approachable and clear.',
+          tweet: 'Write a short social post (max 1500 chars) with a friendly tone.',
+          minutes: 'Write meeting minutes: agenda, key decisions, action items with owners.',
+          commit: 'Write a conventional commit message summarizing the changes (type(scope): subject).',
         }
         const key = 'wr:' + hash(input + wt + Number(localOnly))
         const cached = await cacheGet(key)
@@ -576,33 +573,6 @@ if (localOnly) {
 await cacheSet(key, out)
 if (getTask(tabId)?.canceled) { stopToggle(tabId, false); return }
 return updatePanel(tabId, { message: String(out).slice(0, 5000) })
-      }
-
-      if (msg.action === 'proofread') {
-        await openPanel(tabId, { title: 'DACTI', message: '' })
-        loading(tabId, true)
-        const text = String(params.text || '')
-        if (!text.trim()) return updatePanel(tabId, { message: 'Empty text.' })
-
-        const key = 'pr:' + hash(text + Number(localOnly))
-        const cached = await cacheGet(key)
-        if (cached) return updatePanel(tabId, { message: String(cached).slice(0,5000) })
-
-        const input = (!localOnly && dactiMaskPII) ? maskPII(text) : text
-        log('PATH', localOnly ? 'LOCAL' : 'CLOUD', { action: 'proofread' })
-
-        let out: string
-        if (localOnly) {
-          // Proofreading is not available in local mode, fallback to cloud
-          out = await proofreadText(input, { localOnly: false, signal })
-        } else {
-          out = await proofreadText(input, { localOnly, signal })
-        }
-
-        log('proofread done', { localOnly, len: out?.length })
-        await cacheSet(key, out)
-        if (getTask(tabId)?.canceled) { stopToggle(tabId, false); return }
-        return updatePanel(tabId, { message: String(out).slice(0, 5000) })
       }
     }
   } catch (e: any) {
