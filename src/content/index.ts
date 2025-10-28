@@ -734,18 +734,10 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
         const prompt = await ai.prompt.create({ multimodal: true, model: 'gemini-nano' })
         const res = await prompt.generate({
           image: blob,
-          instruction: 'Return STRICT JSON {"alt":"...","tags":["a","b","c"]}. Alt <=120 chars, objective. No extra text.'
+          instruction: 'Describe the image in a single, concise sentence (max 120 characters). Return only the description.'
         })
-        const cleaned0 = stripFences(String(res ?? ''))
-        let alt = cleaned0.slice(0,120)
-        let tags: string[] = []
-        let parsedOk = false
-        try { const p = JSON.parse(cleaned0); if (p?.alt) { alt = String(p.alt).slice(0,120); tags = Array.isArray(p.tags) ? p.tags.map((t:any)=>String(t)) : []; parsedOk = true } } catch {}
-        if (!parsedOk) {
-          const res2 = await prompt.generate({ image: blob, instruction: 'Describe the image in <=120 characters. Return ONLY the sentence.' })
-          alt = String(res2 ?? '').slice(0,120)
-          tags = []
-        }
+        const alt = stripFences(String(res ?? '')).slice(0, 120)
+        const tags: string[] = []
         const preview = await new Promise<string>((resolve) => {
           const img = new Image(); img.crossOrigin = 'anonymous'
           img.onload = () => { const c = document.createElement('canvas'); c.width = 64; c.height = 64; const g = c.getContext('2d')!; g.drawImage(img, 0, 0, 64, 64); resolve(c.toDataURL('image/png')) }
