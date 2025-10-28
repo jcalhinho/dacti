@@ -304,6 +304,7 @@ wrap.appendChild(btn); wrap.appendChild(menu)
       { label:'→ Português', value:'translate', payload:{ translateTarget:'pt' } },
       { label:'Auto → English', value:'translate', payload:{ translateTarget:'auto' } },
     ])
+    translateDD.btn.title = 'Select text on the page to use this feature.'
     const writeDD = makeDropdown('Write', [
       { label:'Concise email (EN)', value:'write', payload:{ writeType:'email' } },
       { label:'LinkedIn post', value:'write', payload:{ writeType:'linkedin' } },
@@ -318,6 +319,7 @@ wrap.appendChild(btn); wrap.appendChild(menu)
       { label:'Shorter / concise', value:'rewrite', payload:{ style:'shorten' } },
       { label:'Longer / more details', value:'rewrite', payload:{ style:'expand' } },
     ])
+    rewriteDD.btn.title = 'Select text on the page to use this feature.'
 
     grid.appendChild(summarizeDD.wrap)
     grid.appendChild(translateDD.wrap)
@@ -329,6 +331,7 @@ wrap.appendChild(btn); wrap.appendChild(menu)
     progressWrap.appendChild(progressBar)
 
     const outEl = h('div', 'out') as HTMLDivElement
+    outEl.textContent = 'Initializing AI... Please wait.'
 
     // --- Loading animation (cycles one,two,three,four.webp from /public, robustly resolving URLs and bypassing CSP)
     const cacheBust = (u: string) => u + (u.includes('?') ? '&' : '?') + 't=' + Date.now()

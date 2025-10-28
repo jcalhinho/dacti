@@ -28,7 +28,7 @@ Rules:
 - Do not add facts.
 - No meta commentary.
 - Keep URLs, numbers and entities.
-- Output only the rewritten text.
+- Output only the rewritten text. No markdown, no asterisks, no special formatting.
 
 Style: ${cfg.style}
 

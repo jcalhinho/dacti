@@ -25,12 +25,13 @@ export async function translateText(
 
    const target = String(targetLang || 'en')
   const detect = target.toLowerCase() === 'auto'
+  const basePrompt = "Return only plain text, no markdown or special formatting. "
   const prompt = detect
-    ? `Detect the source language and translate into English. Return **only** the translation (no quotes, no preface). Preserve numbers and capitalization.
+    ? basePrompt + `Detect the source language and translate into English. Return **only** the translation (no quotes, no preface). Preserve numbers and capitalization.
 
 TEXT:
 ${text}`
-    : `Translate the following text into ${target}. Return **only** the translation (no quotes, no preface). Preserve numbers and capitalization.
+    : basePrompt + `Translate the following text into ${target}. Return **only** the translation (no quotes, no preface). Preserve numbers and capitalization.
 
 TEXT:
 ${text}`

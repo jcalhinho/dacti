@@ -25,6 +25,16 @@ chrome.runtime.onMessage.addListener((msg, sender) => {
   }
 })
 function stripFences(s: string): string { const m = String(s||'').match(/```(?:json)?\s*([\s\S]*?)```/i); return (m?m[1]:String(s||'')).trim() }
+
+function cleanMarkdown(text: string): string {
+  if (!text) return ''
+  return text
+    .replace(/\*\*(.*?)\*\*/g, '$1') // Bold
+    .replace(/\*(.*?)\*/g, '$1')   // Italic
+    .replace(/^[\s]*[-*]\s/gm, '') // Bullets
+    .trim()
+}
+
 import { rewriteText } from '@/shared/ai/rewriter'
 import { translateText } from '@/shared/ai/translator'
 import { summarizePage } from '@/shared/ai/summarizer'
@@ -232,7 +242,7 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
 
       await cacheSet(key, out)
       if (getTask(tab?.id || -1)?.canceled) return
-      return updatePanel(tab?.id, { message: String(out).slice(0,5000) })
+      return updatePanel(tab?.id, { message: cleanMarkdown(String(out)).slice(0,5000) })
     }
 
     if ((info.menuItemId === 'dacti-rewrite' || String(info.menuItemId).startsWith('dacti-rw-')) && info.selectionText) {
@@ -268,7 +278,7 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
 
       await cacheSet(key, out)
       if (getTask(tab?.id || -1)?.canceled) return
-      return updatePanel(tab?.id, { message: String(out).slice(0,5000) })
+      return updatePanel(tab?.id, { message: cleanMarkdown(String(out)).slice(0,5000) })
     }
 
     if ((info.menuItemId === 'dacti-summarize' || String(info.menuItemId).startsWith('dacti-sum-')) && info.selectionText) {
@@ -304,7 +314,7 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
 
       await cacheSet(key, out)
       if (getTask(tab?.id || -1)?.canceled) return
-      return updatePanel(tab?.id, { message: String(out).slice(0,5000) })
+      return updatePanel(tab?.id, { message: cleanMarkdown(String(out)).slice(0,5000) })
     }
   } catch (e: any) {
     await updatePanel(tab?.id, { title: 'DACTI', message: e?.message ? String(e.message) : String(e) })
@@ -358,7 +368,7 @@ chrome.commands?.onCommand.addListener(async (command) => {
 
     await cacheSet(key, out)
     if (getTask(tab.id)?.canceled) { stopToggle(tab.id, false); return }
-    updatePanel(tab.id, { message: String(out).slice(0,5000) })
+    updatePanel(tab.id, { message: cleanMarkdown(String(out)).slice(0,5000) })
   } catch (e) {
     try {
       const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
@@ -444,7 +454,7 @@ chrome.runtime.onMessage.addListener(async (msg, sender) => {
         log('translate done', { localOnly, len: out?.length })
         await cacheSet(key, out)
         if (getTask(tabId)?.canceled) { stopToggle(tabId, false); return }
-        return updatePanel(tabId, { message: String(out).slice(0,5000) })
+        return updatePanel(tabId, { message: cleanMarkdown(String(out)).slice(0,5000) })
       }
 
       if (msg.action === 'rewrite') {
@@ -458,7 +468,7 @@ chrome.runtime.onMessage.addListener(async (msg, sender) => {
         if (!sel) return updatePanel(tabId, { message: 'Empty selection.' })
         const key = 'rw:' + hash(sel + '|' + style + Number(localOnly))
         const cached = await cacheGet(key)
-        if (cached) return updatePanel(tabId, { message: String(cached).slice(0,5000) })
+        if (cached) return updatePanel(tabId, { message: cleanMarkdown(String(cached)).slice(0,5000) })
         const input = (!localOnly && dactiMaskPII) ? maskPII(sel) : sel
       log('PATH', localOnly ? 'LOCAL' : 'CLOUD', { action: 'rewrite' })
         let out: string
@@ -472,7 +482,7 @@ chrome.runtime.onMessage.addListener(async (msg, sender) => {
         log('rewrite done', { localOnly, len: out?.length })
         await cacheSet(key, out)
         if (getTask(tabId)?.canceled) { stopToggle(tabId, false); return }
-        return updatePanel(tabId, { message: String(out).slice(0,5000) })
+        return updatePanel(tabId, { message: cleanMarkdown(String(out)).slice(0,5000) })
       }
 
       if (msg.action === 'summarize') {
@@ -491,7 +501,7 @@ chrome.runtime.onMessage.addListener(async (msg, sender) => {
         log('PATH', localOnly ? 'LOCAL' : 'CLOUD', { action: 'summarize', mode: params?.summarizeMode })
         const key = 'sm:' + hash(masked + String(params.summarizeMode || '') + Number(localOnly))
         const cached = await cacheGet(key)
-        if (cached) return updatePanel(tabId, { message: String(cached).slice(0,5000) })
+        if (cached) return updatePanel(tabId, { message: cleanMarkdown(String(cached)).slice(0,5000) })
         let out: string
         if (localOnly) {
           const resp: any = await chrome.tabs.sendMessage(tabId, { type: 'DACTI_SUMMARIZE_LOCAL', text: masked, mode: params.summarizeMode })
@@ -508,7 +518,8 @@ chrome.runtime.onMessage.addListener(async (msg, sender) => {
           if (!out || /input\s+is\s+undefined/i.test(String(out))) {
             try {
               const m = String(params.summarizeMode || 'bullets')
-              const prompt = (
+              const basePrompt = "Return only plain text, no markdown or special formatting. "
+              const prompt = basePrompt + (
                 m === 'tldr'     ? `TL;DR in 1–2 sentences.\n\n${masked}` :
                 m === 'eli5'     ? `Explain simply (ELI5). Use short sentences.\n\n${masked}` :
                 m === 'sections' ? `Summarize by sections with H2/H3 headings.\n\n${masked}` :
@@ -524,7 +535,7 @@ chrome.runtime.onMessage.addListener(async (msg, sender) => {
         log('summarize done', { localOnly, len: out?.length })
         await cacheSet(key, out)
         if (getTask(tabId)?.canceled) { stopToggle(tabId, false); return }
-        return updatePanel(tabId, { message: String(out).slice(0, 5000) })
+        return updatePanel(tabId, { message: cleanMarkdown(String(out)).slice(0, 5000) })
       }
 
       if (msg.action === 'write') {
@@ -537,18 +548,19 @@ chrome.runtime.onMessage.addListener(async (msg, sender) => {
           const [{ result: ctxRaw }] = await chrome.scripting.executeScript({ target: { tabId }, func: () => (document.title + "\n\n" + (document.body?.innerText?.slice(0, 5000) || '')) })
           ctx = String(ctxRaw || '')
         }
-        const input = (!localOnly && dactiMaskPII) ? maskPII(ctx) : ctx
+        const input = (!localOnly && dactiMaskPII) ? maskPII(ctx) : input
         const wt = String(params.writeType || 'email')
+        const basePrompt = "Return only plain text, no markdown or special formatting. "
         const map: Record<string,string> = {
-          email: 'Draft a concise email (400-600 words) in English.',
-          linkedin: 'Write a professional LinkedIn post (300-400 words) about the context. Keep it approachable and clear.',
-          tweet: 'Write a short social post (max 1500 chars) with a friendly tone.',
-          minutes: 'Write meeting minutes: agenda, key decisions, action items with owners.',
-          commit: 'Write a conventional commit message summarizing the changes (type(scope): subject).',
+          email: basePrompt + 'Draft a concise email (400-600 words) in English.',
+          linkedin: basePrompt + 'Write a professional LinkedIn post (300-400 words) about the context. Keep it approachable and clear.',
+          tweet: basePrompt + 'Write a short social post (max 1500 chars) with a friendly tone.',
+          minutes: basePrompt + 'Write meeting minutes: agenda, key decisions, action items with owners.',
+          commit: basePrompt + 'Write a conventional commit message summarizing the changes (type(scope): subject).',
         }
         const key = 'wr:' + hash(input + wt + Number(localOnly))
         const cached = await cacheGet(key)
-        if (cached) return updatePanel(tabId, { message: String(cached).slice(0,5000) })
+        if (cached) return updatePanel(tabId, { message: cleanMarkdown(String(cached)).slice(0,5000) })
       log('PATH', localOnly ? 'LOCAL' : 'CLOUD', { action: 'write' })
 let out: string
 if (localOnly) {
@@ -564,7 +576,7 @@ if (localOnly) {
 }
 await cacheSet(key, out)
 if (getTask(tabId)?.canceled) { stopToggle(tabId, false); return }
-return updatePanel(tabId, { message: String(out).slice(0, 5000) })
+return updatePanel(tabId, { message: cleanMarkdown(String(out)).slice(0, 5000) })
       }
     }
   } catch (e: any) {
