@@ -30,7 +30,6 @@ import { translateText } from '@/shared/ai/translator'
 import { summarizePage } from '@/shared/ai/summarizer'
 import { proofreadText } from '@/shared/ai/proofreader'
 import { writeFromContext } from '@/shared/ai/writer'
-import { callGeminiApi } from '@/shared/ai/gemini-api'
 
 // -----------------------------
 // Helpers to drive the in-page panel (content script)
@@ -515,6 +514,7 @@ chrome.runtime.onMessage.addListener(async (msg, sender) => {
           }
           if (!out || /input\s+is\s+undefined/i.test(String(out))) {
             try {
+              const { callGeminiApi } = await import('@/shared/ai/gemini-api')
               const m = String(params.summarizeMode || 'bullets')
               const prompt = (
                 m === 'tldr'     ? `TL;DR in 1–2 sentences.\n\n${masked}` :
