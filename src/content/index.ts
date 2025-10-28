@@ -958,8 +958,8 @@ if (msg.type === 'DACTI_GENERATE_LOCAL_TEXT') {
         const resp = await fetch(dataUrl)
         const blob = await resp.blob()
 
-        // @ts-ignore
-        const hasPrompt = typeof ai !== 'undefined' && ai?.prompt?.create
+        const LM = (self as any)?.LanguageModel || (typeof ai !== 'undefined' ? (ai as any).prompt : undefined)
+        const hasPrompt = !!(LM && (LM as any).create)
         if (!hasPrompt) throw new Error('Local multimodal API unavailable')
 
         // @ts-ignore

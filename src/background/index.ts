@@ -327,8 +327,10 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
     }
 
     if (info.menuItemId === 'dacti-alt-image' && info.srcUrl) {
-      await openPanel(tab?.id, { title: 'DACTI', message: '' })
-      loading(tab?.id, true)
+      const tabId = tab?.id
+      if (!tabId) return
+      await openPanel(tabId, { title: 'DACTI', message: '' })
+      loading(tabId, true)
       const src = info.srcUrl
       log('alt-image single', { src, localOnly })
 
