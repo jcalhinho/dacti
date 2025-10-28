@@ -707,78 +707,6 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     if (msg.show) panelAPI?.startLoading(); else panelAPI?.stopLoading()
     return
   }
-  // --- ASYNC HANDLERS (must return true) ---
-  if (msg.type === 'DACTI_CAPTION_LOCAL') {
-    (async () => {
-      try {
-        log('CAPTION_LOCAL request for', msg.src)
-        let blob: Blob | null = null
-        try {
-          const el = Array.from(document.images).find(im => (im.currentSrc || im.src) === msg.src) as HTMLImageElement | undefined
-          if (el && el.complete && el.naturalWidth && el.naturalHeight) {
-            const c = document.createElement('canvas'); c.width = el.naturalWidth; c.height = el.naturalHeight
-            const g = c.getContext('2d')!; g.drawImage(el, 0, 0)
-            blob = await new Promise<Blob>((resolve) => c.toBlob(b => resolve(b || new Blob()), 'image/png'))
-            log('CAPTION_LOCAL: used image from DOM')
-          }
-        } catch (e) { log('CAPTION_LOCAL: DOM extraction failed, will fetch:', e) }
-        if (!blob) {
-          const resp = await fetch(msg.src, { mode: 'cors' })
-          blob = await resp.blob()
-          log('CAPTION_LOCAL: fetched image over network (may fail offline)')
-        }
-        // @ts-ignore
-        const hasPrompt = typeof ai !== 'undefined' && ai?.prompt?.create
-        if (!hasPrompt) throw new Error('Local multimodal API unavailable')
-        // @ts-ignore
-        const prompt = await ai.prompt.create({ multimodal: true, model: 'gemini-nano' })
-        const res = await prompt.generate({
-          image: blob,
-          instruction: 'Describe the image in a single, concise sentence (max 120 characters). Return only the description.'
-        })
-        const alt = stripFences(String(res ?? '')).slice(0, 120)
-        const tags: string[] = []
-        const preview = await new Promise<string>((resolve) => {
-          const img = new Image(); img.crossOrigin = 'anonymous'
-          img.onload = () => { const c = document.createElement('canvas'); c.width = 64; c.height = 64; const g = c.getContext('2d')!; g.drawImage(img, 0, 0, 64, 64); resolve(c.toDataURL('image/png')) }
-          img.onerror = () => resolve('')
-          img.src = msg.src
-        })
-        sendResponse({ ok: true, alt, tags, preview })
-      } catch (e:any) { sendResponse({ ok:false, error: e?.message || String(e) }) }
-    })()
-    return true
-  }
-
-  if (msg.type === 'DACTI_IMAGE_BASE64') {
-    (async () => {
-      try {
-        log('IMAGE_BASE64 for', msg.src)
-        let dataUrl: string | null = null
-        try {
-          const el = Array.from(document.images).find(im => (im.currentSrc || im.src) === msg.src) as HTMLImageElement | undefined
-          if (el && el.complete && el.naturalWidth && el.naturalHeight) {
-            const c = document.createElement('canvas'); c.width = el.naturalWidth; c.height = el.naturalHeight
-            const g = c.getContext('2d')!; g.drawImage(el, 0, 0)
-            dataUrl = c.toDataURL('image/png')
-            log('IMAGE_BASE64: produced from DOM')
-          }
-        } catch (e) { log('IMAGE_BASE64: DOM extraction failed, will fetch:', e) }
-        if (!dataUrl) {
-          const resp = await fetch(msg.src, { mode: 'cors' })
-          const blob = await resp.blob()
-          const b64tmp = await new Promise<string>((resolve, reject) => {
-            const fr = new FileReader(); fr.onload = () => resolve(String(fr.result).split(',')[1] ?? ''); fr.onerror = reject; fr.readAsDataURL(blob)
-          })
-          dataUrl = 'data:'+(blob.type||'image/png')+';base64,'+b64tmp
-          log('IMAGE_BASE64: fetched image over network (may fail offline)')
-        }
-        const b64 = (dataUrl.split(',')[1] || '')
-        sendResponse({ ok:true, base64: b64, preview: dataUrl })
-      } catch (e:any) { sendResponse({ ok:false, error: e?.message || String(e) }) }
-    })()
-    return true
-  }
 
   // Local-only text ops (summarize / translate / rewrite)
   // if (msg.type === 'DACTI_SUMMARIZE_LOCAL') {
@@ -1022,6 +950,33 @@ if (msg.type === 'DACTI_GENERATE_LOCAL_TEXT') {
   })()
   return true
 }
+  // --- ASYNC HANDLERS (must return true) ---
+  if (msg.type === 'DACTI_PROCESS_IMAGE_LOCAL') {
+    (async () => {
+      try {
+        const dataUrl = msg.dataUrl as string
+        const resp = await fetch(dataUrl)
+        const blob = await resp.blob()
+
+        // @ts-ignore
+        const hasPrompt = typeof ai !== 'undefined' && ai?.prompt?.create
+        if (!hasPrompt) throw new Error('Local multimodal API unavailable')
+
+        // @ts-ignore
+        const prompt = await ai.prompt.create({ multimodal: true, model: 'gemini-nano' })
+        const res = await prompt.generate({
+          image: blob,
+          instruction: 'Describe the image in a single, concise sentence (max 120 characters). Return only the description.'
+        })
+        const alt = stripFences(String(res ?? '')).slice(0, 120)
+        sendResponse({ ok: true, alt })
+      } catch (e: any) {
+        sendResponse({ ok: false, error: e?.message || String(e) })
+      }
+    })()
+    return true
+  }
+
   // --- SYNC HANDLERS ---
   if (msg.type === 'DACTI_PROGRESS') {
     const r = ensurePanel()!
