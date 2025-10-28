@@ -30,6 +30,7 @@ import { translateText } from '@/shared/ai/translator'
 import { summarizePage } from '@/shared/ai/summarizer'
 import { proofreadText } from '@/shared/ai/proofreader'
 import { writeFromContext } from '@/shared/ai/writer'
+import { callGeminiApi } from '@/shared/ai/gemini-api'
 
 // -----------------------------
 // Helpers to drive the in-page panel (content script)
@@ -506,7 +507,6 @@ chrome.runtime.onMessage.addListener(async (msg, sender) => {
           }
           if (!out || /input\s+is\s+undefined/i.test(String(out))) {
             try {
-              const { callGeminiApi } = await import('@/shared/ai/gemini-api')
               const m = String(params.summarizeMode || 'bullets')
               const prompt = (
                 m === 'tldr'     ? `TL;DR in 1–2 sentences.\n\n${masked}` :
@@ -594,7 +594,6 @@ chrome.runtime.onMessage.addListener(async (msg, sender) => {
               } else {
                 // Legacy fallback
                 const prompt = 'You are an alt-text generator. Respond ONLY with JSON of the form {"alt":"...","tags":["a","b","c"]}. Alt <=120 chars.'
-                const { callGeminiApi } = await import('@/shared/ai/gemini-api')
                 const json = await callGeminiApi(`${prompt}\n\nIMAGE_BASE64:\n${got.base64}`, { signal })
                 try { const p = JSON.parse(stripFences(json)); if (p?.alt) { alt = String(p.alt).slice(0,120); tags = Array.isArray(p.tags)?p.tags:[] } else { alt = stripFences(json).slice(0,120) } } catch { alt = stripFences(json).slice(0,120) }
               }
