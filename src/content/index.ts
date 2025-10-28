@@ -951,31 +951,6 @@ if (msg.type === 'DACTI_GENERATE_LOCAL_TEXT') {
   return true
 }
   // --- ASYNC HANDLERS (must return true) ---
-  if (msg.type === 'DACTI_PROCESS_IMAGE_LOCAL') {
-    (async () => {
-      try {
-        const dataUrl = msg.dataUrl as string
-        const resp = await fetch(dataUrl)
-        const blob = await resp.blob()
-
-        const LM = (self as any)?.LanguageModel || (typeof ai !== 'undefined' ? (ai as any).prompt : undefined)
-        const hasPrompt = !!(LM && (LM as any).create)
-        if (!hasPrompt) throw new Error('Local multimodal API unavailable')
-
-        // @ts-ignore
-        const prompt = await ai.prompt.create({ multimodal: true, model: 'gemini-nano' })
-        const res = await prompt.generate({
-          image: blob,
-          instruction: 'Describe the image in a single, concise sentence (max 120 characters). Return only the description.'
-        })
-        const alt = stripFences(String(res ?? '')).slice(0, 120)
-        sendResponse({ ok: true, alt })
-      } catch (e: any) {
-        sendResponse({ ok: false, error: e?.message || String(e) })
-      }
-    })()
-    return true
-  }
 
   // --- SYNC HANDLERS ---
   if (msg.type === 'DACTI_PROGRESS') {
