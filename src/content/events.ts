@@ -1,6 +1,6 @@
 
 import { ensurePanel } from './panel';
-import { log } from './globals';
+import { log, state } from './globals';
 import { secureRender } from './utils';
 
 export function setupListeners() {
@@ -9,9 +9,8 @@ export function setupListeners() {
 
     if (msg.type === 'DACTI_LOADING') {
       ensurePanel();
-      const panelAPI = (ensurePanel() as any).panelAPI;
-      if (msg.show) panelAPI?.startLoading();
-      else panelAPI?.stopLoading();
+      if (msg.show) state.panelAPI?.startLoading();
+      else state.panelAPI?.stopLoading();
       return;
     }
 
@@ -295,7 +294,7 @@ export function setupListeners() {
 
           const pr: any = await (PR as any).create();
           const result = await pr.proofread(text);
-          sendResponse({ ok: true, text: result.text });
+          sendResponse({ ok: true, text: result.text || text });
         } catch (e: any) {
           log('LOCAL proofread error:', e);
           sendResponse({ ok: false, error: e?.message || String(e) });
