@@ -684,14 +684,7 @@ chrome.runtime.onMessage.addListener(async (msg, sender) => {
         const input = (!localOnly && dactiMaskPII) ? maskPII(text) : text
         log('PATH', localOnly ? 'LOCAL' : 'CLOUD', { action: 'proofread' })
 
-        let out: string
-        if (localOnly) {
-          const resp: any = await chrome.tabs.sendMessage(tabId, { type: 'DACTI_PROOFREAD_LOCAL', text: input });
-          if (!resp?.ok) throw new Error(resp?.error || 'Local proofread failed');
-          out = String(resp.text || '');
-        } else {
-          out = await proofreadText(input, { localOnly, signal })
-        }
+        let out: string = await proofreadText(input, { localOnly, signal })
 
         log('proofread done', { localOnly, len: out?.length })
         await cacheSet(key, out)

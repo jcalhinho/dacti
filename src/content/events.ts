@@ -285,23 +285,6 @@ export function setupListeners() {
       }
       return;
     }
-    if (msg.type === 'DACTI_PROOFREAD_LOCAL') {
-      (async () => {
-        try {
-          const text = String(msg.text || '');
-          const PR = (self as any)?.Proofreader || (typeof ai !== 'undefined' ? (ai as any).proofreader : undefined);
-          if (!PR) throw new Error('Local proofreader API unavailable');
-
-          const pr: any = await (PR as any).create();
-          const result = await pr.proofread(text);
-          sendResponse({ ok: true, text: result.text || text });
-        } catch (e: any) {
-          log('LOCAL proofread error:', e);
-          sendResponse({ ok: false, error: e?.message || String(e) });
-        }
-      })();
-      return true;
-    }
   });
 }
 
