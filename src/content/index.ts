@@ -147,7 +147,24 @@ const titleEl = h('div', 'title', 'DACTI') as HTMLDivElement
 
 const closeBtn = h('button', 'close') as HTMLButtonElement
 closeBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>'
-closeBtn.addEventListener('click', () => { host.remove(); refs = null })
+
+    function onDrag(onMove: (ev: MouseEvent) => void, onUp: () => void) {
+      document.addEventListener('mousemove', onMove)
+      document.addEventListener('mouseup', onUp)
+      return () => {
+        document.removeEventListener('mousemove', onMove)
+        document.removeEventListener('mouseup', onUp)
+      }
+    }
+    let cleanupDrag: (() => void) | null = null
+
+    closeBtn.addEventListener('click', () => {
+      try { chrome.runtime.sendMessage({ type: 'DACTI_CANCEL' }) } catch {}
+      if (panelAPI) panelAPI.stopLoading()
+      if (cleanupDrag) cleanupDrag()
+      host.remove()
+      refs = null
+    })
 
 header.appendChild(titleEl)
 // Test probe image to verify chrome-extension:// images load in header
@@ -661,7 +678,6 @@ function setActive(kind: 'summarize' | 'translate' | 'write' | 'rewrite' | 'proo
       try { await navigator.clipboard.writeText(outEl.textContent || '') } catch {}
     })
 
-    // Dragging (document listeners + rAF)
     let dragging = false, ox = 0, oy = 0, raf = 0
     header.addEventListener('mousedown', (ev) => {
       dragging = true
@@ -680,8 +696,7 @@ function setActive(kind: 'summarize' | 'translate' | 'write' | 'rewrite' | 'proo
       })
     }
     const onUp = () => { dragging = false }
-    document.addEventListener('mousemove', onMove)
-    document.addEventListener('mouseup', onUp)
+    cleanupDrag = onDrag(onMove, onUp)
     // Keyboard shortcuts when panel is present: Alt+1..5 map to summarize modes
     document.addEventListener('keydown', (ev) => {
       if (!refs) return
@@ -703,19 +718,33 @@ function setActive(kind: 'summarize' | 'translate' | 'write' | 'rewrite' | 'proo
     const r = ensurePanel()!
     if (title) r.titleEl.textContent = title
     if (typeof message === 'string') {
-      r.outEl.innerHTML = renderMarkdown(message)
+      secureRender(r.outEl, message)
     }
   }
 
-  function renderMarkdown(text: string): string {
-    if (!text) return ''
-    return text
-      .replace(/\*\*(.*?)\*\*/g, '<b>$1</b>') // Bold
-      .replace(/\*(.*?)\*/g, '<i>$1</i>')   // Italic
-      .replace(/^[\s]*[-*]\s(.*)/gm, '<li>$1</li>') // Bullets
-      .replace(/(<li>.*<\/li>)/gs, '<ul>$1</ul>') // Wrap consecutive LIs in a UL
-      .replace(/<\/ul>\s*<ul>/g, '') // Merge adjacent ULs
-      .replace(/\n/g, '<br />') // Newlines
+  function secureRender(el: HTMLElement, text: string) {
+    el.textContent = ''
+    if (!text) return
+
+    const lines = text.split('\n')
+    let list: HTMLUListElement | null = null
+
+    lines.forEach(line => {
+      if (line.match(/^[\s]*[-*]\s/)) {
+        if (!list) {
+          list = document.createElement('ul')
+          el.appendChild(list)
+        }
+        const li = document.createElement('li')
+        li.textContent = line.replace(/^[\s]*[-*]\s/, '')
+        list.appendChild(li)
+      } else {
+        list = null
+        const p = document.createElement('p')
+        p.textContent = line
+        el.appendChild(p)
+      }
+    })
   }
 
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {

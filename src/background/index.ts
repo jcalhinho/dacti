@@ -82,17 +82,45 @@ function hash(str: string) {
   return String(h >>> 0)
 }
 
+function sanitizeError(e: any): string {
+  const msg = String(e?.message || e || 'An unknown error occurred.')
+  if (/fetch failed|network error|offline/i.test(msg)) {
+    return 'Network error. Please check your connection.'
+  }
+  return msg.substring(0, 200)
+}
+
 // -----------------------------
-// Basic PII masker (only for cloud path)
+// PII masker with Luhn check for credit cards
 // -----------------------------
 function maskPII(s: string) {
+  const luhnCheck = (s: string) => {
+    let sum = 0;
+    let alternate = false;
+    for (let i = s.length - 1; i >= 0; i--) {
+      let n = parseInt(s.charAt(i), 10);
+      if (alternate) {
+        n *= 2;
+        if (n > 9) {
+          n = (n % 10) + 1;
+        }
+      }
+      sum += n;
+      alternate = !alternate;
+    }
+    return (sum % 10) === 0;
+  };
+
   return s
     // emails
     .replace(/([a-zA-Z0-9._%+-]+)@([a-zA-Z0-9.-]+)\.[a-zA-Z]{2,}/g, '[EMAIL]')
-    // phone numbers (broad heuristic)
-    .replace(/\b(?:\+\d{1,3}[\s-]?)?(?:\(?\d{2,3}\)?[\s-]?)?\d{3}[\s-]?\d{2,4}[\s-]?\d{2,4}\b/g, '[PHONE]')
-    // payment cards (13–19 digits)
-    .replace(/\b(?:\d[ -]*?){13,19}\b/g, '[CARD]')
+    // phone numbers (more specific)
+    .replace(/\b(?:\+\d{1,3}[-\s]?)?\(?\d{3}\)?[-\s]?\d{3}[-\s]?\d{4}\b/g, '[PHONE]')
+    // payment cards (13–19 digits) with Luhn validation
+    .replace(/\b(\d[ -]*?){13,19}\b/g, (match) => {
+      const digits = match.replace(/\D/g, '');
+      return luhnCheck(digits) ? '[CARD]' : match;
+    });
 }
 
 // -----------------------------
@@ -225,7 +253,7 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
           }
         }
       } catch (e) {
-        updatePanel(tab?.id, { title: 'DACTI • Translate', message: String((e as any)?.message || e) })
+        updatePanel(tab?.id, { title: 'DACTI • Translate', message: sanitizeError(e) })
         loading(tab?.id, false)
         return
       }
@@ -307,7 +335,7 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
       return updatePanel(tab?.id, { message: String(out).slice(0,5000) })
     }
   } catch (e: any) {
-    await updatePanel(tab?.id, { title: 'DACTI', message: e?.message ? String(e.message) : String(e) })
+    await updatePanel(tab?.id, { title: 'DACTI', message: sanitizeError(e) })
   } finally {
     loading(tab?.id, false)
     stopToggle(tab?.id, false)
@@ -362,7 +390,7 @@ chrome.commands?.onCommand.addListener(async (command) => {
   } catch (e) {
     try {
       const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
-      if (tab?.id) updatePanel(tab.id, { title: 'DACTI • Error', message: String((e as any)?.message || e) })
+      if (tab?.id) updatePanel(tab.id, { title: 'DACTI • Error', message: sanitizeError(e) })
     } catch {}
   } finally {
     try {
@@ -605,7 +633,7 @@ return updatePanel(tabId, { message: String(out).slice(0, 5000) })
   } catch (e: any) {
     log('panel action error', msg?.action, e?.message)
     const canceled = !!getTask(tabId)?.canceled || String(e?.name||'').toLowerCase() === 'aborterror'
-    return updatePanel(tabId, { title: 'DACTI • Error', message: canceled ? CANCELED_MSG : (e?.message ? String(e.message) : String(e)) })
+    return updatePanel(tabId, { title: 'DACTI • Error', message: canceled ? CANCELED_MSG : sanitizeError(e) })
   } finally {
     loading(tabId, false)
     stopToggle(tabId, false)
