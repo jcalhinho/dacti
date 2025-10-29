@@ -261,6 +261,17 @@ const grid = h('div', 'grid')
 
 
 
+    // Track the currently open dropdown menu within the ShadowRoot so only one stays open
+    let openDropdownMenu: HTMLDivElement | null = null
+
+    // Attach a single global closer on first panel build (stored on the root to avoid duplicates)
+    if (!(root as any).__dropdownGlobalCloser) {
+      (root as any).__dropdownGlobalCloser = true
+      root.addEventListener('click', () => {
+        if (openDropdownMenu) { openDropdownMenu.style.display = 'none'; openDropdownMenu = null }
+      })
+    }
+
     // --- Dropdown factory
     function makeDropdown(label: string, items: {label:string, value:'summarize'|'translate'|'write'|'rewrite', payload?:any}[]) {
       const wrap = h('div') as HTMLDivElement
@@ -273,21 +284,22 @@ const grid = h('div', 'grid')
         Object.assign(mi.style, { padding:'8px 10px', borderRadius:'6px', cursor:'pointer', fontSize:'12px' })
         mi.addEventListener('mouseenter', () => mi.style.background = 'color-mix(in srgb, var(--accent), var(--btn-bg) 85%)')
         mi.addEventListener('mouseleave', () => mi.style.background = 'transparent')
-       mi.addEventListener('click', () => {
-  menu.style.display = 'none'
-  setActive(it.value as any)
-  const p: any = (it as any).payload || {}
-  if (it.value === 'summarize' && p?.summarizeMode) {
-    try { chrome.storage.local.set({ dactiSummarizeMode: p.summarizeMode }) } catch {}
-  }
-  if (it.value === 'translate' && p?.translateTarget) {
-    try { chrome.storage.local.set({ dactiTranslateTarget: p.translateTarget }) } catch {}
-  }
-  if (it.value === 'rewrite' && p?.style) {
-    try { chrome.storage.local.set({ dactiRewriteStyle: p.style }) } catch {}
-  }
-  run(it.value, it.payload)
-})
+        mi.addEventListener('click', () => {
+          menu.style.display = 'none'
+          if (openDropdownMenu === menu) openDropdownMenu = null
+          setActive(it.value as any)
+          const p: any = (it as any).payload || {}
+          if (it.value === 'summarize' && p?.summarizeMode) {
+            try { chrome.storage.local.set({ dactiSummarizeMode: p.summarizeMode }) } catch {}
+          }
+          if (it.value === 'translate' && p?.translateTarget) {
+            try { chrome.storage.local.set({ dactiTranslateTarget: p.translateTarget }) } catch {}
+          }
+          if (it.value === 'rewrite' && p?.style) {
+            try { chrome.storage.local.set({ dactiRewriteStyle: p.style }) } catch {}
+          }
+          run(it.value, it.payload)
+        })
         menu.appendChild(mi)
       })
    wrap.style.position = 'relative'
@@ -297,13 +309,22 @@ wrap.appendChild(btn); wrap.appendChild(menu)
       btn.addEventListener('click', (ev) => {
         ev.stopPropagation()
         const showing = menu.style.display === 'block'
-        document.querySelectorAll('.dropdownMenu').forEach(m => (m as HTMLElement).style.display = 'none')
+
+        // Close any other open dropdown inside the ShadowRoot
+        if (openDropdownMenu && openDropdownMenu !== menu) {
+          openDropdownMenu.style.display = 'none'
+        }
+
+        // Toggle current menu and record as the open one (or clear if closing)
         menu.style.display = showing ? 'none' : 'block'
+        openDropdownMenu = showing ? null : menu
+
         const rect = btn.getBoundingClientRect()
         Object.assign(menu.style, { top: (btn.offsetTop + btn.offsetHeight + 4) + 'px', left: '0px', minWidth: rect.width + 'px' })
       })
-      document.addEventListener('click', () => { menu.style.display = 'none' })
-      wrap.addEventListener('wheel', () => { menu.style.display = 'none' })
+      wrap.addEventListener('wheel', () => {
+        if (openDropdownMenu) { openDropdownMenu.style.display = 'none'; openDropdownMenu = null }
+      })
       return { wrap, btn }
     }
 
