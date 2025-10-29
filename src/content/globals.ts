@@ -14,14 +14,17 @@ export type PanelRefs = {
   closeBtn: HTMLButtonElement;
 } | null;
 
-export let refs: PanelRefs = null;
-export let buildingPanel = false;
+export const state = {
+  refs: null as PanelRefs,
+  buildingPanel: false,
+  panelAPI: null as { startLoading: () => void; stopLoading: () => void } | null,
+  initMessageShown: false,
+  modeChosen: false,
+};
+
 export const DBG = true;
 export const log = (...a: any[]) => {
   try {
     console.log('[DACTI]', ...a);
   } catch {}
 };
-export let panelAPI: { startLoading: () => void; stopLoading: () => void } | null = null;
-export let initMessageShown = false;
-export let modeChosen = false;

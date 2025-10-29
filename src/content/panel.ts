@@ -1,10 +1,6 @@
 
 import {
-  refs,
-  buildingPanel,
-  panelAPI,
-  initMessageShown,
-  modeChosen,
+  state,
   log,
 } from './globals';
 import { h } from './utils';
@@ -162,9 +158,9 @@ function createPanelElements() {
 }
 
 export function ensurePanel() {
-  if (refs.refs) return refs.refs;
-  if (buildingPanel) return refs.refs as any;
-  refs.buildingPanel = true;
+  if (state.refs) return state.refs;
+  if (state.buildingPanel) return state.refs as any;
+  state.buildingPanel = true;
 
   const { root, host, header, titleEl, outEl, btnProofread, closeBtn, controls, grid, copyBtn } = createPanelElements();
 
@@ -199,10 +195,10 @@ export function ensurePanel() {
 
   closeBtn.addEventListener('click', () => {
     try { chrome.runtime.sendMessage({ type: 'DACTI_CANCEL' }) } catch {}
-    if (panelAPI) panelAPI.stopLoading();
+    if (state.panelAPI) state.panelAPI.stopLoading();
     if (cleanupDrag) cleanupDrag();
     host.remove();
-    refs.refs = null;
+    state.refs = null;
   });
 
   header.appendChild(titleEl);
@@ -384,9 +380,9 @@ export function ensurePanel() {
   const progressBar = h('div','progressBar') as HTMLDivElement;
   progressWrap.appendChild(progressBar);
 
-  if (!initMessageShown) {
+  if (!state.initMessageShown) {
     outEl.textContent = 'Initializing the AI engine… preparing Local/Cloud mode. Please wait.';
-    refs.initMessageShown = true;
+    state.initMessageShown = true;
     console.log('[DEBUG] Message shown');
   }
 
@@ -452,7 +448,7 @@ export function ensurePanel() {
     if (panelTimer)  { clearTimeout(panelTimer);  panelTimer = null }
     if (headerLoaderImg) headerLoaderImg.src = chrome.runtime.getURL('one.webp');
   }
-  refs.panelAPI = { startLoading, stopLoading };
+  state.panelAPI = { startLoading, stopLoading };
 
   const wrap = root.querySelector('.wrap') as HTMLDivElement;
   stopBtn.style.width = 'calc(100% - 24px)';
@@ -606,7 +602,7 @@ export function ensurePanel() {
     const locked = !localAvailable;
     renderMode(currentLocal, locked && !currentLocal);
     setBadge(currentLocal);
-    refs.modeChosen = true;
+    state.modeChosen = true;
     if ((outEl.textContent || '').startsWith('Initializing the AI engine…')) {
       outEl.textContent = '';
     }
@@ -710,7 +706,7 @@ export function ensurePanel() {
   const onUp = () => { dragging = false };
   cleanupDrag = onDrag(onMove, onUp);
   document.addEventListener('keydown', (ev) => {
-    if (!refs.refs) return;
+    if (!state.refs) return;
     if (!ev.altKey || ev.repeat) return;
     const map: Record<string,string> = { '1':'tldr','2':'bullets','3':'eli5','4':'sections','5':'facts' };
     const m = map[ev.key];
@@ -720,8 +716,8 @@ export function ensurePanel() {
     setActive('summarize');
     run('summarize', { summarizeMode: m });
   });
-  refs.buildingPanel = false;
-  refs.refs = { root, host, header, titleEl, outEl, localOnlyCheckbox: undefined as any, btnSummarize: summarizeDD.btn, btnTranslate: translateDD.btn, btnRewrite: rewriteDD.btn, btnWrite: writeDD.btn, btnProofread, closeBtn };
+  state.buildingPanel = false;
+  state.refs = { root, host, header, titleEl, outEl, localOnlyCheckbox: undefined as any, btnSummarize: summarizeDD.btn, btnTranslate: translateDD.btn, btnRewrite: rewriteDD.btn, btnWrite: writeDD.btn, btnProofread, closeBtn };
   document.documentElement.appendChild(host);
-  return refs.refs;
+  return state.refs;
 }
