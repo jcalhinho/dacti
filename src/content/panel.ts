@@ -660,7 +660,7 @@ export function ensurePanel() {
     try {
       await chrome.runtime.sendMessage({ type: 'DACTI_ACTION', action, localOnly, params });
     } finally {
-      stopLoading();
+      // stopLoading(); // Let the background script control this
       ;(stopBtn as HTMLButtonElement).disabled = true;
       stopBtn.style.display = 'none';
       modeInput.disabled = !localAvailable && userMode !== 'cloud';

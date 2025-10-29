@@ -249,8 +249,8 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
     stopToggle(tab?.id, true)
 
     if ((info.menuItemId === 'dacti-translate' || String(info.menuItemId).startsWith('dacti-tr-')) && info.selectionText) {
-      await openPanel(tab?.id, { title: 'DACTI', message: '' })
-      loading(tab?.id, true)
+      await openPanel(tab?.id, { title: 'DACTI', message: '' });
+      await loading(tab?.id, true);
 
       // Determine target language
       let target = 'en'
@@ -302,8 +302,8 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
     }
 
     if ((info.menuItemId === 'dacti-rewrite' || String(info.menuItemId).startsWith('dacti-rw-')) && info.selectionText) {
-      await openPanel(tab?.id, { title: 'DACTI', message: '' })
-      loading(tab?.id, true)
+      await openPanel(tab?.id, { title: 'DACTI', message: '' });
+      await loading(tab?.id, true);
 
       // Determine style: submenu explicit or last saved for parent click
       let style = 'simplify'
@@ -338,8 +338,8 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
     }
 
     if ((info.menuItemId === 'dacti-summarize' || String(info.menuItemId).startsWith('dacti-sum-')) && info.selectionText) {
-      await openPanel(tab?.id, { title: 'DACTI', message: '' })
-      loading(tab?.id, true)
+      await openPanel(tab?.id, { title: 'DACTI', message: '' });
+      await loading(tab?.id, true);
 
       // Determine mode: submenu explicit or last saved for parent click
       let mode = 'bullets'
@@ -393,8 +393,8 @@ chrome.commands?.onCommand.addListener(async (command) => {
     const signal = t.abort.signal
     stopToggle(tab.id, true)
 
-    await openPanel(tab.id, { title: 'DACTI', message: '' })
-    loading(tab.id, true)
+    await openPanel(tab.id, { title: 'DACTI', message: '' });
+    await loading(tab.id, true);
 
     const [{ result: sel } = { result: '' }] = await chrome.scripting.executeScript({
       target: { tabId: tab.id },
@@ -443,7 +443,7 @@ chrome.commands?.onCommand.addListener(async (command) => {
 // Toolbar icon → open panel
 // -----------------------------
 chrome.action.onClicked.addListener(async (tab) => {
-  await openPanel(tab.id, { title: 'DACTI', message: '' })
+  await openPanel(tab.id, { title: 'DACTI', message: undefined })
 })
 
 // -----------------------------
@@ -486,8 +486,7 @@ chrome.runtime.onMessage.addListener(async (msg, sender) => {
       const params = msg.params || {}
       stopToggle(tabId, true)
       if (msg.action === 'translate') {
-        await openPanel(tabId, { title: 'DACTI', message: '' })
-        loading(tabId, true)
+        await loading(tabId, true);
         const fromPanel = params?.source === 'panel' && typeof params?.text === 'string'
         let sel: string = fromPanel
           ? String(params.text)
@@ -525,8 +524,7 @@ chrome.runtime.onMessage.addListener(async (msg, sender) => {
 
       if (msg.action === 'rewrite') {
         const style = String(params?.style || 'simplify')
-        await openPanel(tabId, { title: 'DACTI', message: '' })
-        loading(tabId, true)
+        await loading(tabId, true);
         const fromPanel = params?.source === 'panel' && typeof params?.text === 'string'
         let sel: string = fromPanel
           ? String(params.text)
@@ -562,8 +560,7 @@ chrome.runtime.onMessage.addListener(async (msg, sender) => {
       }
 
       if (msg.action === 'summarize') {
-        await openPanel(tabId, { title: 'DACTI', message: '' })
-        loading(tabId, true)
+        await loading(tabId, true);
         const fromPanel = params?.source === 'panel' && typeof params?.text === 'string'
         let input: string
         if (fromPanel) {
@@ -614,8 +611,7 @@ chrome.runtime.onMessage.addListener(async (msg, sender) => {
       }
 
       if (msg.action === 'write') {
-        await openPanel(tabId, { title: 'DACTI', message: '' })
-        loading(tabId, true)
+        await loading(tabId, true);
         let ctx: string
         if (params?.source === 'panel' && typeof params?.text === 'string') {
           ctx = String(params.text)
@@ -677,8 +673,7 @@ chrome.runtime.onMessage.addListener(async (msg, sender) => {
       }
 
       if (msg.action === 'proofread') {
-        await openPanel(tabId, { title: 'DACTI', message: '' })
-        loading(tabId, true)
+        await loading(tabId, true);
         const text = String(params.text || '')
         if (!text.trim()) return updatePanel(tabId, { message: 'Empty text.' })
 
