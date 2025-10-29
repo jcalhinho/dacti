@@ -200,10 +200,10 @@ chrome.runtime.onInstalled.addListener(() => {
     const currentTr = (typeof dactiTranslateTarget === 'string') ? dactiTranslateTarget : 'en'
     const trModes = [
       ['en', '→ English'],
-      ['fr', '→ Français'],
-      ['es', '→ Español'],
-      ['de', '→ Deutsch'],
-      ['pt', '→ Português'],
+      ['fr', '→ French'],
+      ['es', '→ Spanish'],
+      ['de', '→ German'],
+      ['pt', '→ Portuguese'],
       ['auto', 'Auto → English'],
     ] as const
     for (const [id, title] of trModes) {
