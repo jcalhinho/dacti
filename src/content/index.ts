@@ -19,6 +19,8 @@
   const DBG = true
   const log = (...a: any[]) => { try { console.log('[DACTI]', ...a) } catch {} }
   let panelAPI: { startLoading: () => void; stopLoading: () => void } | null = null
+  let __initMessageShown = false
+  let __modeChosen = false
 
   const stripFences = (s: string) => { const m = String(s||'').match(/```(?:json)?\s*([\s\S]*?)```/i); return (m?m[1]:String(s||'')).trim() }
 
@@ -67,16 +69,117 @@
       .close:hover { background: color-mix(in srgb, var(--btn-bg), #000 5%); }
       .wrap[data-theme="dark"] .close { color:#e5e7eb; }
       .controls { padding:10px 12px; border-bottom:1px solid var(--border); display:flex; align-items:center; justify-content:space-between; gap:8px; flex-wrap: wrap; }
-     .grid { display:grid; grid-template-columns: repeat(2, minmax(0,1fr)); align-items:stretch; gap:12px; padding:10px 12px; }
-.btn { appearance:none; border:1px solid var(--btn-border); background:var(--btn-bg); border-radius:8px; padding:12px; font-size:14px; font-weight:600; color:var(--text); cursor:pointer; display:flex; align-items:center; justify-content:center; gap:6px; transition: box-shadow .2s ease, border-color .2s ease, transform .06s ease; min-height:44px; width:100%; }
-.btn:hover { box-shadow: var(--btn-hover-shadow); border-color: color-mix(in srgb, var(--accent) 40%, var(--btn-border)); }.btn.active{
-  background: color-mix(in srgb, var(--accent) 12%, var(--btn-bg));
-  border-color: color-mix(in srgb, var(--accent) 55%, var(--btn-border));
-}
+      .grid { display:grid; grid-template-columns: repeat(2, minmax(0,1fr)); align-items:stretch; gap:12px; padding:10px 12px; }
+      .btn { appearance:none; border:1px solid var(--btn-border); background:var(--btn-bg); border-radius:8px; padding:10px; font-size:11px; font-weight:500; color:var(--text); cursor:pointer; display:flex; align-items:center; justify-content:space-between; gap:6px; transition: box-shadow .2s ease, border-color .2s ease, transform .06s ease; min-height:40px; width:100%; position:relative; }
+      .btn:hover { box-shadow: var(--btn-hover-shadow); border-color: color-mix(in srgb, var(--accent) 40%, var(--btn-border)); }
+      .btn.active{
+        background: color-mix(in srgb, var(--accent) 12%, var(--btn-bg));
+        border-color: color-mix(in srgb, var(--accent) 55%, var(--btn-border));
+      }
+      .btn .btnLabel{ flex:1; text-align:left; text-transform: uppercase; }
+      .btn .right{ display:flex; align-items:center; gap:8px; }
+      .btn .caret{ line-height:1; }
+      .grid .btn.proofread{ grid-column: 1 / -1; }
+      .grid .btn.proofread{ justify-content:center; }
+      .grid .btn.proofread .right{ position:absolute; right:12px; }
+      .btn .left{ display:flex; align-items:center; gap:8px; min-width:0; }
+      .btn .btnLabel{ flex:0 1 auto; overflow:hidden; text-overflow:ellipsis; }
+      .btn .info{ position:relative; width:13px; height:13px; display:inline-flex; align-items:center; justify-content:center; border:1px solid var(--text); border-radius:50%; font-size:10px; line-height:1; opacity:.75; cursor:help; user-select:none; font-weight:400; }
+      .btn .info:hover{ opacity:1; }
+      .btn .info::after{ content: attr(data-tip); position:absolute; bottom: calc(100% + 8px); left:50%; transform: translateX(-50%); width:200px; max-width:220px; white-space:normal; word-break: break-word; background: var(--card); color: var(--text); border:1px solid var(--border); border-radius:8px; padding:8px 10px; box-shadow: 0 8px 22px rgba(0,0,0,.18); opacity:0; pointer-events:none; transition:opacity .12s ease; z-index:10000; }
+      .btn .info::before{ content:""; position:absolute; bottom: calc(100% + 4px); left:50%; transform: translateX(-50%) rotate(45deg); width:8px; height:8px; background: var(--card); border-left:1px solid var(--border); border-top:1px solid var(--border); opacity:0; transition:opacity .12s ease; }
+      .btn .info:hover::after, .btn .info:hover::before{ opacity:1; }
       .btn:active { transform: translateY(1px); }
       .btn:disabled { opacity:.6; cursor:default; box-shadow:none; }
-      .out { flex:1 1 auto; margin:12px; margin-top:0; border:1px solid var(--border); border-radius:12px; background:var(--card); padding:10px; overflow:auto; white-space:pre-wrap; min-height:60px; font-size:12px; -webkit-user-modify: read-write-plaintext-only; }
-      .toolbar { display:flex; gap:8px; padding:8px 12px; border-top:1px solid var(--border); background:var(--subtle); border-bottom-left-radius:20px; border-bottom-right-radius:20px; }
+      .out {
+  flex:1 1 auto;
+  margin:12px;
+  margin-top:0;
+  border:1px solid var(--border);
+  border-radius:12px;
+  background: color-mix(in srgb, var(--accent) 4%, var(--card));
+  padding:10px;
+  overflow:auto;
+  white-space:pre-wrap;
+  min-height:60px;
+  font-size:12px;
+  -webkit-user-modify: read-write-plaintext-only;
+  transition: box-shadow .2s ease, border-color .2s ease;
+}
+.out:hover {
+  box-shadow: var(--btn-hover-shadow);
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
+}
+.out:focus {
+  outline:none;
+  box-shadow: var(--btn-hover-shadow);
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+}
+/* --- Markdown styles inside output panel --- */
+.out h1 {
+  font-size: 18px;
+  margin: 10px 0 8px;
+  font-weight: 700;
+}
+.out h2 {
+  font-size: 16px;
+  margin: 10px 0 8px;
+  font-weight: 700;
+}
+.out h3 {
+  font-size: 14px;
+  margin: 8px 0 6px;
+  font-weight: 700;
+}
+.out p {
+  margin: 6px 0;
+}
+.out strong, .out b {
+  font-weight: 700;
+}
+.out em, .out i {
+  font-style: italic;
+}
+.out ul, .out ol {
+  margin: 6px 0 6px 18px;
+  padding: 0;
+}
+.out li {
+  line-height: 1.4;
+  margin: 2px 0;
+}
+.out code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: 12px;
+  background: color-mix(in srgb, var(--accent) 8%, var(--card));
+  padding: 1px 4px;
+  border-radius: 4px;
+}
+.out pre {
+  background: color-mix(in srgb, var(--accent) 6%, var(--card));
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px;
+  overflow: auto;
+  margin: 8px 0;
+}
+.out pre code {
+  background: transparent;
+  padding: 0;
+}
+.out blockquote {
+  border-left: 3px solid color-mix(in srgb, var(--accent) 45%, var(--border));
+  margin: 6px 0;
+  padding: 4px 8px;
+  color: var(--muted);
+}
+.out hr {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 10px 0;
+}  
+
+.toolbar { display:flex; gap:8px; padding:8px 12px; border-top:1px solid var(--border); background:var(--subtle); border-bottom-left-radius:20px; border-bottom-right-radius:20px; }
       .small { font-size:12px; display:flex; align-items:center; gap:6px; color:var(--muted); }
       .badge { font-size:11px; padding:2px 6px; border:1px solid var(--badge-border); border-radius:999px; color:var(--accent); background: var(--badge-bg); }
       .header .badge{ margin-left:auto; }
@@ -147,6 +250,9 @@ const titleEl = h('div', 'title', 'DACTI') as HTMLDivElement
 
 const closeBtn = h('button', 'close') as HTMLButtonElement
 closeBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>'
+
+
+
 
     function onDrag(onMove: (ev: MouseEvent) => void, onUp: () => void) {
       document.addEventListener('mousemove', onMove)
@@ -273,9 +379,11 @@ const grid = h('div', 'grid')
     }
 
     // --- Dropdown factory
-    function makeDropdown(label: string, items: {label:string, value:'summarize'|'translate'|'write'|'rewrite', payload?:any}[]) {
+    function makeDropdown(label: string, items: {label:string, value:'summarize'|'translate'|'write'|'rewrite', payload?:any}[], tip: string) {
       const wrap = h('div') as HTMLDivElement
-      const btn = h('button', 'btn', label + ' ▾') as HTMLButtonElement
+      const btn = h('button', 'btn has-caret') as HTMLButtonElement
+      btn.addEventListener('mousedown', (ev) => { ev.preventDefault(); outEl.blur() })
+      btn.innerHTML = `<span class="left"><span class="btnLabel">${label}</span></span><span class="right"><span class="info" data-tip="${tip.replace(/"/g,'&quot;')}">i</span><span class="caret" aria-hidden="true">▾</span></span>`
       const menu = h('div') as HTMLDivElement
       Object.assign(menu.style, { position:'absolute', background:'var(--btn-bg)', border:'1px solid var(--btn-border)', borderRadius:'8px', boxShadow:'0 8px 22px rgba(0,0,0,.18)', padding:'6px', display:'none', zIndex:'9999' })
       menu.className = 'dropdownMenu'
@@ -334,7 +442,7 @@ wrap.appendChild(btn); wrap.appendChild(menu)
       { label:'ELI5 (simplify)', value:'summarize', payload:{ summarizeMode:'eli5' } },
       { label:'By sections (H2/H3)', value:'summarize', payload:{ summarizeMode:'sections' } },
       { label:'Key facts & numbers', value:'summarize', payload:{ summarizeMode:'facts' } },
-    ])
+    ], 'Quickly summarizes the selected content in multiple formats.')
     const translateDD = makeDropdown('Translate', [
       { label:'→ English', value:'translate', payload:{ translateTarget:'en' } },
       { label:'→ Français', value:'translate', payload:{ translateTarget:'fr' } },
@@ -342,23 +450,25 @@ wrap.appendChild(btn); wrap.appendChild(menu)
       { label:'→ Deutsch', value:'translate', payload:{ translateTarget:'de' } },
       { label:'→ Português', value:'translate', payload:{ translateTarget:'pt' } },
       { label:'Auto → English', value:'translate', payload:{ translateTarget:'auto' } },
-    ])
+    ], 'Translate the selected text to the chosen language.')
     const writeDD = makeDropdown('Write', [
       { label:'Concise email (EN)', value:'write', payload:{ writeType:'email' } },
       { label:'LinkedIn post', value:'write', payload:{ writeType:'linkedin' } },
       { label:'Tweet / short social', value:'write', payload:{ writeType:'tweet' } },
       { label:'Meeting minutes', value:'write', payload:{ writeType:'minutes' } },
       { label:'Conventional commit', value:'write', payload:{ writeType:'commit' } },
-    ])
+    ], 'Generate text from the current context (email, post, etc.).')
     const rewriteDD = makeDropdown('Rewrite', [
       { label:'Simplify (clear & plain)', value:'rewrite', payload:{ style:'simplify' } },
       { label:'More formal/professional', value:'rewrite', payload:{ style:'formal' } },
       { label:'Friendlier / conversational', value:'rewrite', payload:{ style:'friendly' } },
       { label:'Shorter / concise', value:'rewrite', payload:{ style:'shorten' } },
       { label:'Longer / more details', value:'rewrite', payload:{ style:'expand' } },
-    ])
+    ], 'Rewrite the selected text in the desired style.')
 
-    const btnProofread = h('button', 'btn', 'Proofread') as HTMLButtonElement
+    const btnProofread = h('button', 'btn proofread') as HTMLButtonElement
+    btnProofread.addEventListener('mousedown', (ev) => { ev.preventDefault(); outEl.blur() })
+    btnProofread.innerHTML = `<span class="left"><span class="btnLabel">Proofread</span></span><span class="right"><span class="info" data-tip="Corrects grammar, spelling, and style of the current text.">i</span></span>`
 
     grid.appendChild(summarizeDD.wrap)
     grid.appendChild(translateDD.wrap)
@@ -372,7 +482,12 @@ wrap.appendChild(btn); wrap.appendChild(menu)
 
     const outEl = h('div', 'out') as HTMLDivElement
     outEl.contentEditable = 'true'
-    outEl.textContent = 'Initializing AI... Please wait.'
+    console.log('[DEBUG] ensurePanel → initMessageShown?', __initMessageShown)
+if (!__initMessageShown) {
+  outEl.textContent = 'Initializing the AI engine… preparing Local/Cloud mode. Please wait.'
+  __initMessageShown = true
+  console.log('[DEBUG] Message affiché')
+}
 
     // --- Loading animation (cycles one,two,three,four.webp from /public, robustly resolving URLs and bypassing CSP)
     const cacheBust = (u: string) => u + (u.includes('?') ? '&' : '?') + 't=' + Date.now()
@@ -481,12 +596,20 @@ wrap.appendChild(stopBtn)
     let userMode: 'auto'|'local'|'cloud' = 'auto'
     let userTouchedToggle = false
 
+    let __initEverCompleted = false
+    let __initInProgress = false
+
     const showProgress = (p: number) => {
+      if (!__initInProgress) return
       const progressWrap = wrap.querySelector('.progressWrap') as HTMLDivElement
       const progressBar = wrap.querySelector('.progressBar') as HTMLDivElement
       progressWrap.style.display = 'block'
       progressBar.style.width = Math.max(0, Math.min(100, Math.round(p*100))) + '%'
-      if (p >= 1) setTimeout(() => { progressWrap.style.display = 'none'; progressBar.style.width = '0%' }, 400)
+      if (p >= 1) {
+        __initInProgress = false
+        __initEverCompleted = true
+        setTimeout(() => { progressWrap.style.display = 'none'; progressBar.style.width = '0%' }, 400)
+      }
     }
 
     async function detectLocalAvailability() {
@@ -543,13 +666,17 @@ wrap.appendChild(stopBtn)
         showStatus('🚫 Local mode unavailable: `ai.summarizer`/`ai.prompt` APIs are missing. Switching to Cloud.\nTip: To test local capabilities, check your Chrome settings and flags (chrome://flags) to enable the Prompt API / on-device models, then reopen the panel.')
         return false
       }
-      showProgress(0)
+      // Only show the progress bar if model is being downloaded for the first time
+      if (availability === 'downloadable' || availability === 'downloading') {
+        if (!__initEverCompleted) { __initInProgress = true }
+      }
       try {
         if (hasSummarizer) {
-        const sm: any = await (Summ as any).create({
-  type: 'key-points',
-  outputLanguage: 'en',
-  monitor(m: any) {
+          const sm: any = await (Summ as any).create({
+            type: 'key-points',
+            outputLanguage: 'en',
+            monitor(m: any) {
+              __initInProgress = true;
               try {
                 m.addEventListener?.('downloadprogress', (e: any) => {
                   const frac = Math.min(1, Number(e?.loaded || 0) / Math.max(1, Number(e?.total || 1)))
@@ -565,6 +692,7 @@ wrap.appendChild(stopBtn)
             expectedInputs: [{ type: 'text' }],
             expectedOutputs: [{ type: 'text' }],
             monitor(m: any) {
+              __initInProgress = true;
               try {
                 m.addEventListener?.('downloadprogress', (e: any) => {
                   const frac = Math.min(1, Number(e?.loaded || 0) / Math.max(1, Number(e?.total || 1)))
@@ -622,6 +750,10 @@ wrap.appendChild(stopBtn)
       const locked = !localAvailable
       renderMode(currentLocal, locked && !currentLocal)
       setBadge(currentLocal)
+      __modeChosen = true
+      if ((outEl.textContent || '').startsWith('Initializing the AI engine…')) {
+        outEl.textContent = ''
+      }
     })
 
     modeInput.addEventListener('change', () => {
@@ -657,6 +789,7 @@ function setActive(kind: 'summarize' | 'translate' | 'write' | 'rewrite' | 'proo
 }
     const run = async (action: 'summarize' | 'translate' | 'write' | 'rewrite' | 'proofread', params?: any) => {
         setActive(action)
+        outEl.blur()
       startLoading()
       await detectLocalAvailability()
       if (!userTouchedToggle) {
@@ -777,31 +910,6 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     if (msg.show) panelAPI?.startLoading(); else panelAPI?.stopLoading()
     return
   }
-
-  // Local-only text ops (summarize / translate / rewrite)
-  // if (msg.type === 'DACTI_SUMMARIZE_LOCAL') {
-  //   (async () => {
-  //     try {
-  //       const text = String(msg.text || '')
-  //       const mode = String(msg.mode || '')
-  //       const Summ = (self as any)?.Summarizer || (typeof ai !== 'undefined' ? (ai as any).summarizer : undefined)
-  //       const LM   = (self as any)?.LanguageModel || (typeof ai !== 'undefined' ? (ai as any).prompt     : undefined)
-  //       log('LOCAL summarize using', { Summ: !!Summ, LM: !!LM, mode })
-  //       let out = ''
-  //       if (Summ && (Summ as any).create) {
-  //       const sm: any = await (Summ as any).create({ type: 'key-points', outputLanguage: 'en' })
-  //         out = String(await sm.summarize?.(text) ?? '')
-  //       } else if (LM && (LM as any).create) {
-  //         const pr: any = await (LM as any).create({ expectedInputs:[{type:'text'}], expectedOutputs:[{type:'text'}] })
-  //         const prompt = ['Summarize the following text clearly.', mode ? `Mode: ${mode}` : '', text].filter(Boolean).join('\n\n')
-  //         out = String(await pr.prompt?.(prompt) ?? '')
-  //       } else {
-  //         throw new Error('Local summarize API unavailable')
-  //       }
-  //       sendResponse({ ok: true, text: out })
-  //     } catch (e:any) { log('LOCAL summarize error:', e); sendResponse({ ok:false, error: e?.message || String(e) }) }
-  //   })(); return true
-  // }
 
 
     // Local-only text ops (summarize / translate / rewrite)

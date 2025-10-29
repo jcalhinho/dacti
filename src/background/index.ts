@@ -82,6 +82,44 @@ function hash(str: string) {
   return String(h >>> 0)
 }
 
+// --- Chunking helpers (paragraph-aware + sequential mapper) ---
+function chunkText(s: string, max = 6000): string[] {
+  const clean = String(s || '').replace(/\r/g,'').replace(/\t/g,' ').replace(/ {2,}/g,' ')
+  const paras = clean.split(/\n{2,}/)
+  const out: string[] = []
+  let buf = ''
+  for (const p of paras) {
+    const add = buf ? (buf + '\n\n' + p) : p
+    if (add.length <= max) {
+      buf = add
+    } else {
+      if (buf) out.push(buf)
+      if (p.length <= max) {
+        buf = p
+      } else {
+        for (let i = 0; i < p.length; i += max) out.push(p.slice(i, i + max))
+        buf = ''
+      }
+    }
+  }
+  if (buf) out.push(buf)
+  return out
+}
+
+async function mapChunks(
+  text: string,
+  max: number,
+  worker: (part: string, i: number, total: number) => Promise<string>,
+  joiner = '\n'
+): Promise<string> {
+  const parts = chunkText(text, max)
+  const outs: string[] = []
+  for (let i = 0; i < parts.length; i++) {
+    outs.push(await worker(parts[i], i, parts.length))
+  }
+  return outs.join(joiner)
+}
+
 function sanitizeError(e: any): string {
   const msg = String(e?.message || e || 'An unknown error occurred.')
   if (/fetch failed|network error|offline/i.test(msg)) {
@@ -464,14 +502,20 @@ chrome.runtime.onMessage.addListener(async (msg, sender) => {
         const cached = await cacheGet(key)
         if (cached) return updatePanel(tabId, { message: String(cached).slice(0,5000) })
         const input = (!localOnly && dactiMaskPII) ? maskPII(sel) : sel
-      log('PATH', localOnly ? 'LOCAL' : 'CLOUD', { action: 'translate' })
+        log('PATH', localOnly ? 'LOCAL' : 'CLOUD', { action: 'translate' })
+        // --- Chunked translation ---
+        const MAX_IN = 6000
         let out: string
         if (localOnly) {
-          const resp: any = await chrome.tabs.sendMessage(tabId, { type: 'DACTI_TRANSLATE_LOCAL', text: input, target })
-          if (!resp?.ok) throw new Error(resp?.error || 'Local translate failed')
-          out = String(resp.text || '')
+          out = await mapChunks(input, MAX_IN, async (part) => {
+            const resp: any = await chrome.tabs.sendMessage(tabId, { type: 'DACTI_TRANSLATE_LOCAL', text: part, target })
+            if (!resp?.ok) throw new Error(resp?.error || 'Local translate failed')
+            return String(resp.text || '')
+          }, '\n')
         } else {
-          out = await translateText(input, target as any, { localOnly, signal })
+          out = await mapChunks(input, MAX_IN, async (part) => {
+            return await translateText(part, target as any, { localOnly: false, signal })
+          }, '\n')
         }
         log('translate done', { localOnly, len: out?.length })
         await cacheSet(key, out)
@@ -496,14 +540,20 @@ chrome.runtime.onMessage.addListener(async (msg, sender) => {
         const cached = await cacheGet(key)
         if (cached) return updatePanel(tabId, { message: String(cached).slice(0,5000) })
         const input = (!localOnly && dactiMaskPII) ? maskPII(sel) : sel
-      log('PATH', localOnly ? 'LOCAL' : 'CLOUD', { action: 'rewrite' })
+        log('PATH', localOnly ? 'LOCAL' : 'CLOUD', { action: 'rewrite' })
+        // --- Chunked rewrite ---
+        const MAX_IN = 6000
         let out: string
         if (localOnly) {
-          const resp: any = await chrome.tabs.sendMessage(tabId, { type: 'DACTI_REWRITE_LOCAL', text: input, style })
-          if (!resp?.ok) throw new Error(resp?.error || 'Local rewrite failed')
-          out = String(resp.text || '')
+          out = await mapChunks(input, MAX_IN, async (part) => {
+            const resp: any = await chrome.tabs.sendMessage(tabId, { type: 'DACTI_REWRITE_LOCAL', text: part, style })
+            if (!resp?.ok) throw new Error(resp?.error || 'Local rewrite failed')
+            return String(resp.text || '')
+          }, '\n\n')
         } else {
-          out = await rewriteText(input, { style }, { localOnly, signal })
+          out = await mapChunks(input, MAX_IN, async (part) => {
+            return await rewriteText(part, { style }, { localOnly: false, signal })
+          }, '\n\n')
         }
         log('rewrite done', { localOnly, len: out?.length })
         await cacheSet(key, out)
@@ -585,22 +635,45 @@ chrome.runtime.onMessage.addListener(async (msg, sender) => {
         const key = 'wr:' + hash(input + wt + Number(localOnly))
         const cached = await cacheGet(key)
         if (cached) return updatePanel(tabId, { message: String(cached).slice(0,5000) })
-      log('PATH', localOnly ? 'LOCAL' : 'CLOUD', { action: 'write' })
-let out: string
-if (localOnly) {
-  const resp: any = await chrome.tabs.sendMessage(tabId, {
-    type: 'DACTI_GENERATE_LOCAL_TEXT',
-    context: input,
-    task: map[wt] || map.email,
-  })
-  if (!resp?.ok) throw new Error(resp?.error || 'Local write failed')
-  out = String(resp.text || '')
-} else {
-  out = await writeFromContext(input, { task: map[wt] || map.email }, { localOnly, signal })
-}
-await cacheSet(key, out)
-if (getTask(tabId)?.canceled) { stopToggle(tabId, false); return }
-return updatePanel(tabId, { message: String(out).slice(0, 5000) })
+        log('PATH', localOnly ? 'LOCAL' : 'CLOUD', { action: 'write' })
+        // --- Chunked summarize → condense → write ---
+        // Pre-summarize the context in chunks to keep token budget sane, then write once for coherence
+        const MAX_IN = 6000
+        const chunkSummary = async (part: string) => {
+          if (localOnly) {
+            const resp: any = await chrome.tabs.sendMessage(tabId, { type: 'DACTI_SUMMARIZE_LOCAL', text: part, mode: 'bullets' })
+            if (!resp?.ok) throw new Error(resp?.error || 'Local summarize failed')
+            return String(resp.text || '')
+          } else {
+            return await summarizePage(part, { localOnly: false, mode: 'bullets', signal })
+          }
+        }
+        const summarized = await mapChunks(input, MAX_IN, (part) => chunkSummary(part), '\n')
+        // Optional condensation pass
+        let condensed: string
+        if (localOnly) {
+          const resp: any = await chrome.tabs.sendMessage(tabId, { type: 'DACTI_SUMMARIZE_LOCAL', text: summarized, mode: 'bullets' })
+          condensed = String(resp?.text || summarized)
+        } else {
+          try {
+            condensed = await summarizePage(summarized, { localOnly: false, mode: 'bullets', signal })
+          } catch { condensed = summarized }
+        }
+        let out: string
+        if (localOnly) {
+          const resp: any = await chrome.tabs.sendMessage(tabId, {
+            type: 'DACTI_GENERATE_LOCAL_TEXT',
+            context: condensed,
+            task: map[wt] || map.email,
+          })
+          if (!resp?.ok) throw new Error(resp?.error || 'Local write failed')
+          out = String(resp.text || '')
+        } else {
+          out = await writeFromContext(condensed, { task: map[wt] || map.email }, { localOnly: false, signal })
+        }
+        await cacheSet(key, out)
+        if (getTask(tabId)?.canceled) { stopToggle(tabId, false); return }
+        return updatePanel(tabId, { message: String(out).slice(0, 5000) })
       }
 
       if (msg.action === 'proofread') {
