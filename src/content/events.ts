@@ -294,8 +294,8 @@ export function setupListeners() {
           if (!PR) throw new Error('Local proofreader API unavailable');
 
           const pr: any = await (PR as any).create();
-          const out = await pr.proofread(text);
-          sendResponse({ ok: true, text: out });
+          const result = await pr.proofread(text);
+          sendResponse({ ok: true, text: result.text });
         } catch (e: any) {
           log('LOCAL proofread error:', e);
           sendResponse({ ok: false, error: e?.message || String(e) });

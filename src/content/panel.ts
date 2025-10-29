@@ -203,7 +203,7 @@ export function ensurePanel() {
 
   header.appendChild(titleEl);
   const testImg = new Image();
-  testImg.src = chrome.runtime.getURL('one.webp');
+  testImg.src = chrome.runtime.getURL('two.webp');
   testImg.alt = 'dacti_loader';
   testImg.width = 40;
   testImg.height = 40;
@@ -446,7 +446,7 @@ export function ensurePanel() {
   function stopLoading() {
     if (headerTimer) { clearTimeout(headerTimer); headerTimer = null }
     if (panelTimer)  { clearTimeout(panelTimer);  panelTimer = null }
-    if (headerLoaderImg) headerLoaderImg.src = chrome.runtime.getURL('one.webp');
+    if (headerLoaderImg) headerLoaderImg.src = chrome.runtime.getURL('two.webp');
   }
   state.panelAPI = { startLoading, stopLoading };
 
