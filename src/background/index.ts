@@ -686,8 +686,9 @@ chrome.runtime.onMessage.addListener(async (msg, sender) => {
 
         let out: string
         if (localOnly) {
-          // Proofreading is not available in local mode, fallback to cloud
-          out = await proofreadText(input, { localOnly: false, signal })
+          const resp: any = await chrome.tabs.sendMessage(tabId, { type: 'DACTI_PROOFREAD_LOCAL', text: input });
+          if (!resp?.ok) throw new Error(resp?.error || 'Local proofread failed');
+          out = String(resp.text || '');
         } else {
           out = await proofreadText(input, { localOnly, signal })
         }
