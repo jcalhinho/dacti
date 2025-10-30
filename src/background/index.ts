@@ -673,7 +673,8 @@ chrome.runtime.onMessage.addListener(async (msg, sender) => {
       }
 
       if (msg.action === 'proofread') {
-        await loading(tabId, true);
+        await openPanel(tabId, { title: 'DACTI', message: '' })
+        loading(tabId, true)
         const text = String(params.text || '')
         if (!text.trim()) return updatePanel(tabId, { message: 'Empty text.' })
 
@@ -684,7 +685,13 @@ chrome.runtime.onMessage.addListener(async (msg, sender) => {
         const input = (!localOnly && dactiMaskPII) ? maskPII(text) : text
         log('PATH', localOnly ? 'LOCAL' : 'CLOUD', { action: 'proofread' })
 
-        let out: string = await proofreadText(input, { localOnly, signal })
+        let out: string
+        if (localOnly) {
+          // Proofreading is not available in local mode, fallback to cloud
+          out = await proofreadText(input, { localOnly: false, signal })
+        } else {
+          out = await proofreadText(input, { localOnly, signal })
+        }
 
         log('proofread done', { localOnly, len: out?.length })
         await cacheSet(key, out)

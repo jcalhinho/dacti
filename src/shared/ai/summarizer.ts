@@ -21,15 +21,7 @@ CONTENT:
 ${text}`
     case 'sections':
       return `${baseGuard}
-Task: Create a **sectioned outline** with short bullets. Use Markdown strictly like:
-
-## Section Title
-- point
-- point
-
-## Section Title
-- point
-- point
+Task: Create a **sectioned outline** with short bullets. 
 
 No extra text.
 CONTENT:
@@ -42,7 +34,7 @@ ${text}`
     case 'bullets':
     default:
       return `${baseGuard}
-Task: Summarize in **5–7 concise bullets**. No duplication; neutral tone.
+Task: Summarize in **5 concise bullets**. No duplication; neutral tone.
 CONTENT:
 ${text}`
   }

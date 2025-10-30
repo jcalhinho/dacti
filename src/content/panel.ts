@@ -94,6 +94,7 @@ function createPanelElements() {
       font-size: 12px;
     }
     .toolbar { display:flex; gap:8px; padding:8px 12px; border-top:1px solid var(--border); background:var(--subtle); border-bottom-left-radius:20px; border-bottom-right-radius:20px; }
+    .toolbar .btn{ justify-content:center; } 
     .small { font-size:12px; display:flex; align-items:center; gap:6px; color:var(--muted); }
     .badge { font-size:11px; padding:2px 6px; border:1px solid var(--badge-border); border-radius:999px; color:var(--accent); background: var(--badge-bg); }
     .header .badge{ margin-left:auto; }
