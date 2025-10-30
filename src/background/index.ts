@@ -685,13 +685,7 @@ chrome.runtime.onMessage.addListener(async (msg, sender) => {
         const input = (!localOnly && dactiMaskPII) ? maskPII(text) : text
         log('PATH', localOnly ? 'LOCAL' : 'CLOUD', { action: 'proofread' })
 
-        let out: string
-        if (localOnly) {
-          // Proofreading is not available in local mode, fallback to cloud
-          out = await proofreadText(input, { localOnly: false, signal })
-        } else {
-          out = await proofreadText(input, { localOnly, signal })
-        }
+        const out = await proofreadText(input, { localOnly, signal })
 
         log('proofread done', { localOnly, len: out?.length })
         await cacheSet(key, out)
