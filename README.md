@@ -50,8 +50,20 @@ Gemini Nano targets relatively recent hardware. Google occasionally updates the 
 
 Practical tips from testing:
 
+
 - The first download can take several minutes depending on internet speed and disk throughput—keep Chrome open and the machine powered during this step.
-- Keep `chrome://flags/#enable-chrome-built-in-ai` and `chrome://flags/#prompt-api-for-gemini-nano` enabled, then restart Chrome after changing them.
+
+#### Recommended Chrome Flags
+
+For full local functionality, enable the following exploratory flags and restart Chrome. Refer to the [Generative AI Use Policy](https://policies.google.com/terms/generative-ai/use-policy) for the latest guidance.
+
+- `chrome://flags/#enable-chrome-built-in-ai`
+- `chrome://flags/#prompt-api-for-gemini-nano`
+- `chrome://flags/#prompt-api-for-gemini-nano-multimodal-input`
+- `chrome://flags/#summarization-api-for-gemini-nano`
+- `chrome://flags/#writer-api-for-gemini-nano`
+- `chrome://flags/#rewriter-api-for-gemini-nano`
+- `chrome://flags/#proofreader-api-for-gemini-nano`
 
 ### Installation & Build
 
