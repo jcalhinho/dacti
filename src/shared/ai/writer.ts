@@ -13,7 +13,7 @@ export async function writeFromContext(
       // @ts-ignore
       const wr = await ai.writer.create({ model: 'gemini-nano' })
       const out = await wr.write({ instruction: task.task, context })
-      return String(out?.text ?? out ?? '')
+    return String(out?.text ?? out ?? '').trim()
     } catch (e) {
       if (options?.localOnly) throw e
     }
@@ -35,5 +35,6 @@ ${task.task}
 
 Context:
 ${context}`
-  return callGeminiApi(prompt, { signal: options?.signal })
+  const t = await callGeminiApi(prompt, { signal: options?.signal })
+return String(t).trim()
 }

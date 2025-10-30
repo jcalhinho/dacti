@@ -12,8 +12,9 @@ export async function translateText(
     try {
       // @ts-ignore
       const tr = await ai.translator.create({ model: 'gemini-nano' })
-     const out = await tr.translate({ text, targetLanguage: (targetLang && targetLang !== 'auto') ? targetLang : 'en' })
-      return String(out?.text ?? out ?? '')
+    const lang = (targetLang && targetLang !== 'auto') ? targetLang.toLowerCase() : 'en'
+const out = await tr.translate({ text, targetLanguage: lang })
+return String(out?.text ?? out ?? '').trim()
     } catch (e) {
       if (options?.localOnly) throw e
     }
@@ -25,7 +26,7 @@ export async function translateText(
 
    const target = String(targetLang || 'en')
   const detect = target.toLowerCase() === 'auto'
-  const basePrompt = "Return only plain text, no markdown or special formatting. "
+  const basePrompt = "Return only plain text, no markdown, no quotes, no preface. "
   const prompt = detect
     ? basePrompt + `Detect the source language and translate into English. Return **only** the translation (no quotes, no preface). Preserve numbers and capitalization.
 
