@@ -111,6 +111,7 @@ export function setupListeners() {
     if (!msg || typeof msg !== 'object') return;
 
     if (msg.type === 'DACTI_LOADING') {
+      if (state.panelDismissed) return;
       ensurePanel();
       if (msg.show) state.panelAPI?.startLoading();
       else state.panelAPI?.stopLoading();
@@ -328,6 +329,7 @@ export function setupListeners() {
     }
 
     if (msg.type === 'DACTI_PROGRESS') {
+      if (state.panelDismissed) return;
       const r = ensurePanel()!;
       const progressWrap = r.root.querySelector('.progressWrap') as HTMLDivElement;
       const progressBar = r.root.querySelector('.progressBar') as HTMLDivElement;
@@ -343,15 +345,18 @@ export function setupListeners() {
     }
 
     if (msg.type === 'DACTI_PANEL_OPEN') {
+      state.panelDismissed = false;
       setContent(msg.title, msg.message);
       return;
     }
     if (msg.type === 'DACTI_PANEL_UPDATE') {
+      if (state.panelDismissed) return;
       setContent(msg.title, msg.message);
       return;
     }
 
     if (msg.type === 'DACTI_PANEL_ACTIVE') {
+      if (state.panelDismissed) return;
       const kind = String((msg as any).kind || '');
       if (['summarize','translate','write','rewrite','proofread'].includes(kind)) {
         state.activeKind = kind as any;
@@ -362,6 +367,7 @@ export function setupListeners() {
     }
 
     if (msg.type === 'DACTI_STOP_SHOW' || msg.type === 'DACTI_STOP_HIDE') {
+      if (state.panelDismissed) return;
       const r = ensurePanel()!;
       const btn = r.root.querySelector('.btn.stop') as HTMLButtonElement | null;
       if (!btn) return;
@@ -378,6 +384,7 @@ export function setupListeners() {
 }
 
 function setContent(title?: string, message?: string) {
+  if (state.panelDismissed) return;
   const r = ensurePanel()!;
   if (title) r.titleEl.textContent = title;
   if (typeof message === 'string') {

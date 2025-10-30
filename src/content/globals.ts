@@ -22,6 +22,7 @@ export const state = {
     stopLoading: () => void;
     setActive: (kind: 'summarize' | 'translate' | 'write' | 'rewrite' | 'proofread') => void;
   } | null,
+  panelDismissed: false,
   initMessageShown: false,
   modeChosen: false,
   activeKind: null as ('summarize' | 'translate' | 'write' | 'rewrite' | 'proofread') | null,

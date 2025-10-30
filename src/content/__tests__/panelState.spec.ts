@@ -14,6 +14,7 @@ describe('panel state management', () => {
     state.buildingPanel = false
     state.panelAPI = null
     state.activeKind = null
+    state.panelDismissed = false
     const matchMediaMock = vi.fn().mockReturnValue({
       matches: false,
       addEventListener: vi.fn(),

@@ -226,7 +226,10 @@ export function ensurePanel() {
 
   closeBtn.addEventListener('click', () => {
     try { chrome.runtime.sendMessage({ type: 'DACTI_CANCEL', silent: true }) } catch (err) { debugError('Close button cancel failed', err) }
+    state.panelDismissed = true;
     if (state.panelAPI) state.panelAPI.stopLoading();
+    state.panelAPI = null;
+    state.activeKind = null;
     if (cleanupDrag) cleanupDrag();
     host.remove();
     state.refs = null;
@@ -772,6 +775,7 @@ export function ensurePanel() {
     run('summarize', { summarizeMode: m });
   });
   state.buildingPanel = false;
+  state.panelDismissed = false;
   state.refs = { root, host, header, titleEl, outEl, localOnlyCheckbox: undefined as any, btnSummarize: summarizeDD.btn, btnTranslate: translateDD.btn, btnRewrite: rewriteDD.btn, btnWrite: writeDD.btn, btnProofread, closeBtn };
   document.documentElement.appendChild(host);
   return state.refs;
