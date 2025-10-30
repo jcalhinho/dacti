@@ -2,8 +2,14 @@
 import {
   state,
   log,
+  DBG,
 } from './globals';
 import { h } from './utils';
+
+const debugError = (label: string, err: unknown) => {
+  if (!DBG) return;
+  log(label, err);
+};
 
 function createPanelElements() {
   const host = h('div') as HTMLDivElement;
@@ -61,11 +67,32 @@ function createPanelElements() {
     .btn .btnLabel{ flex:0 1 auto; overflow:hidden; text-overflow:ellipsis; }
     .btn .info{ position:relative; width:13px; height:13px; display:inline-flex; align-items:center; justify-content:center; border:1px solid var(--text); border-radius:50%; font-size:10px; line-height:1; opacity:.75; cursor:help; user-select:none; font-weight:400; }
     .btn .info:hover{ opacity:1; }
-    .btn .info::after{ content: attr(data-tip); position:absolute; bottom: calc(100% + 8px); left:50%; transform: translateX(-50%); width:200px; max-width:220px; white-space:normal; word-break: break-word; background: var(--card); color: var(--text); border:1px solid var(--border); border-radius:8px; padding:8px 10px; box-shadow: 0 8px 22px rgba(0,0,0,.18); opacity:0; pointer-events:none; transition:opacity .12s ease; z-index:10000; }
+    .btn .info::after{ content: attr(data-tip); position:absolute; bottom: calc(100% + 8px); left:50%; transform: translateX(-50%); width:160px; max-width:180px; white-space:normal; word-break: break-word; background: var(--card); color: var(--text); border:1px solid var(--border); border-radius:8px; padding:8px 10px; box-shadow: 0 8px 22px rgba(0,0,0,.18); opacity:0; pointer-events:none; transition:opacity .12s ease; z-index:10000; }
+    .btn .info.align-left::after{ left:auto; right:0; transform: translateX(0); }
     .btn .info::before{ content:""; position:absolute; bottom: calc(100% + 4px); left:50%; transform: translateX(-50%) rotate(45deg); width:8px; height:8px; background: var(--card); border-left:1px solid var(--border); border-top:1px solid var(--border); opacity:0; transition:opacity .12s ease; }
+    .btn .info.align-left::before{ left:auto; right:8px; transform: rotate(45deg); }
     .btn .info:hover::after, .btn .info:hover::before{ opacity:1; }
+    .dropdownItem{ display:flex; align-items:center; justify-content:space-between; gap:8px; }
+    .dropdownItem .info{ position:relative; width:13px; height:13px; display:inline-flex; align-items:center; justify-content:center; border:1px solid var(--text); border-radius:50%; font-size:10px; line-height:1; opacity:.75; cursor:help; user-select:none; font-weight:400; }
+    .dropdownItem .info:hover{ opacity:1; }
+    .dropdownItem .info::after{ content: attr(data-tip); position:absolute; bottom: calc(100% + 6px); left:50%; transform: translateX(-50%); width:180px; max-width:200px; padding:6px 8px; border-radius:6px; border:1px solid var(--border); background:var(--card); color:var(--text); box-shadow:0 6px 18px rgba(0,0,0,.18); white-space:normal; word-break:break-word; opacity:0; pointer-events:none; transition:opacity .12s ease; z-index:10000; }
+    .dropdownItem .info.align-left::after{ left:auto; right:0; transform: translateX(0); }
+    .dropdownItem .info::before{ content:""; position:absolute; bottom: calc(100% + 2px); left:50%; transform: translateX(-50%) rotate(45deg); width:6px; height:6px; background: var(--card); border-left:1px solid var(--border); border-top:1px solid var(--border); opacity:0; transition:opacity .12s ease; }
+    .dropdownItem .info.align-left::before{ left:auto; right:6px; transform: rotate(45deg); }
+    .dropdownItem .info:hover::after, .dropdownItem .info:hover::before{ opacity:1; }
     .btn:active { transform: translateY(1px); }
     .btn:disabled { opacity:.6; cursor:default; box-shadow:none; }
+    .markdown-output{ font-size:12px; line-height:1.45; color:var(--text); }
+    .markdown-output h2{ font-size:15px; font-weight:600; margin:12px 0 6px; color: color-mix(in srgb, var(--accent), var(--text) 40%); }
+    .markdown-output h3{ font-size:13px; font-weight:600; margin:10px 0 4px; color: color-mix(in srgb, var(--accent) 60%, var(--text)); }
+    .markdown-output p{ margin:0 0 10px; }
+    .markdown-output ul{ margin:0 0 10px 16px; padding:0 0 0 8px; }
+    .markdown-output li{ margin:0 0 6px; }
+    .markdown-output blockquote{ margin:10px 0; padding:6px 10px; border-left:3px solid var(--accent); background: color-mix(in srgb, var(--accent) 8%, var(--card)); color: var(--muted); border-radius:8px; }
+    .markdown-output code{ background: color-mix(in srgb, var(--accent) 12%, var(--card)); border-radius:4px; padding:0 4px; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; font-size:11px; }
+    .markdown-output hr{ border:none; border-top:1px solid color-mix(in srgb, var(--accent) 35%, var(--border)); margin:12px 0; }
+    .markdown-output a{ color: var(--accent); text-decoration:none; font-weight:500; }
+    .markdown-output a:hover{ text-decoration:underline; }
     .out {
       flex:1 1 auto;
       margin:12px;
@@ -141,8 +168,11 @@ function createPanelElements() {
   const grid = h('div', 'grid');
   const btnProofread = h('button', 'btn proofread') as HTMLButtonElement;
   btnProofread.innerHTML = `<span class="left"><span class="btnLabel">Proofread</span></span><span class="right"><span class="info" data-tip="Corrects grammar, spelling, and style of the current text.">i</span></span>`;
+  const proofInfo = btnProofread.querySelector('.info') as HTMLSpanElement | null;
+  proofInfo?.classList.add('align-left');
   const outEl = h('div', 'out') as HTMLDivElement;
   outEl.contentEditable = 'true';
+  outEl.classList.add('markdown-output');
   const toolbar = h('div', 'toolbar');
   const copyBtn = h('button', 'btn', 'Copy') as HTMLButtonElement;
 
@@ -195,7 +225,7 @@ export function ensurePanel() {
   let cleanupDrag: (() => void) | null = null;
 
   closeBtn.addEventListener('click', () => {
-    try { chrome.runtime.sendMessage({ type: 'DACTI_CANCEL' }) } catch {}
+    try { chrome.runtime.sendMessage({ type: 'DACTI_CANCEL', silent: true }) } catch (err) { debugError('Close button cancel failed', err) }
     if (state.panelAPI) state.panelAPI.stopLoading();
     if (cleanupDrag) cleanupDrag();
     host.remove();
@@ -262,7 +292,7 @@ export function ensurePanel() {
   stopBtn.style.display = 'none';
   stopBtn.addEventListener('click', async () => {
     stopBtn.disabled = true;
-    try { await chrome.runtime.sendMessage({ type:'DACTI_CANCEL' }) } catch {}
+    try { await chrome.runtime.sendMessage({ type:'DACTI_CANCEL' }) } catch (err) { debugError('Stop button cancel failed', err) }
   });
 
   const badge = h('span', 'badge', 'Detecting…');
@@ -288,16 +318,27 @@ export function ensurePanel() {
     });
   }
 
-  function makeDropdown(label: string, items: {label:string, value:'summarize'|'translate'|'write'|'rewrite', payload?:any}[], tip: string) {
+  type DropdownValue = 'summarize' | 'translate' | 'write' | 'rewrite';
+  type InfoAlign = 'center' | 'left';
+  function makeDropdown(
+    label: string,
+    items: { label: string; value: DropdownValue; payload?: any; tip?: string; tipAlign?: InfoAlign }[],
+    tip: string,
+    infoAlign: InfoAlign = 'center'
+  ) {
     const wrap = h('div') as HTMLDivElement;
     const btn = h('button', 'btn has-caret') as HTMLButtonElement;
     btn.addEventListener('mousedown', (ev) => { ev.preventDefault(); outEl.blur() });
     btn.innerHTML = `<span class="left"><span class="btnLabel">${label}</span></span><span class="right"><span class="info" data-tip="${tip.replace(/"/g,'&quot;')}">i</span><span class="caret" aria-hidden="true">▾</span></span>`;
+    if (infoAlign === 'left') {
+      const infoEl = btn.querySelector('.info') as HTMLSpanElement | null;
+      infoEl?.classList.add('align-left');
+    }
     const menu = h('div') as HTMLDivElement;
     Object.assign(menu.style, { position:'absolute', background:'var(--btn-bg)', border:'1px solid var(--btn-border)', borderRadius:'8px', boxShadow:'0 8px 22px rgba(0,0,0,.18)', padding:'6px', display:'none', zIndex:'9999' });
     menu.className = 'dropdownMenu';
     items.forEach(it => {
-      const mi = h('div', 'dropdownItem', it.label) as HTMLDivElement;
+      const mi = h('div', 'dropdownItem') as HTMLDivElement;
       Object.assign(mi.style, { padding:'8px 10px', borderRadius:'6px', cursor:'pointer', fontSize:'12px' });
       mi.addEventListener('mouseenter', () => mi.style.background = 'color-mix(in srgb, var(--accent), var(--btn-bg) 85%)');
       mi.addEventListener('mouseleave', () => mi.style.background = 'transparent');
@@ -307,16 +348,26 @@ export function ensurePanel() {
         setActive(it.value as any);
         const p: any = (it as any).payload || {};
         if (it.value === 'summarize' && p?.summarizeMode) {
-          try { chrome.storage.local.set({ dactiSummarizeMode: p.summarizeMode }) } catch {}
+          try { chrome.storage.local.set({ dactiSummarizeMode: p.summarizeMode }) } catch (err) { debugError('Failed to persist summarize mode (dropdown)', err) }
         }
         if (it.value === 'translate' && p?.translateTarget) {
-          try { chrome.storage.local.set({ dactiTranslateTarget: p.translateTarget }) } catch {}
+          try { chrome.storage.local.set({ dactiTranslateTarget: p.translateTarget }) } catch (err) { debugError('Failed to persist translate target (dropdown)', err) }
         }
         if (it.value === 'rewrite' && p?.style) {
-          try { chrome.storage.local.set({ dactiRewriteStyle: p.style }) } catch {}
+          try { chrome.storage.local.set({ dactiRewriteStyle: p.style }) } catch (err) { debugError('Failed to persist rewrite style (dropdown)', err) }
         }
         run(it.value, it.payload);
       });
+      const labelEl = h('span', 'itemLabel', it.label);
+      labelEl.style.flex = '1';
+      mi.appendChild(labelEl);
+      if (it.tip) {
+        const info = h('span', 'info', 'i') as HTMLSpanElement;
+        info.dataset.tip = it.tip;
+        if ((it.tipAlign || infoAlign) === 'left') info.classList.add('align-left');
+        info.addEventListener('click', (ev) => { ev.stopPropagation(); });
+        mi.appendChild(info);
+      }
       menu.appendChild(mi);
     });
     wrap.style.position = 'relative';
@@ -342,34 +393,34 @@ export function ensurePanel() {
   }
 
   const summarizeDD = makeDropdown('Summarize', [
-    { label:'TL;DR (1–2 sentences)', value:'summarize', payload:{ summarizeMode:'tldr' } },
-    { label:'5 bullet points', value:'summarize', payload:{ summarizeMode:'bullets' } },
-    { label:'ELI5 (simplify)', value:'summarize', payload:{ summarizeMode:'eli5' } },
-    { label:'By sections (H2/H3)', value:'summarize', payload:{ summarizeMode:'sections' } },
-    { label:'Key facts & numbers', value:'summarize', payload:{ summarizeMode:'facts' } },
-  ], 'Quickly summarizes the selected content in multiple formats.');
+    { label:'TL;DR (1–2 sentences)', value:'summarize', payload:{ summarizeMode:'tldr' }, tip:'Condenses the selection into 1–2 plain sentences without bullets.' },
+    { label:'5 bullet points', value:'summarize', payload:{ summarizeMode:'bullets' }, tip:'Five concise bullets capturing the key themes of the selection.' },
+    { label:'ELI5 (simplify)', value:'summarize', payload:{ summarizeMode:'eli5' }, tip:'Explains the content in kid-friendly language with short, simple bullets.' },
+    { label:'By sections (H2/H3)', value:'summarize', payload:{ summarizeMode:'sections' }, tip:'Produces an outline grouped by logical sections with headings.' },
+    { label:'Key facts & numbers', value:'summarize', payload:{ summarizeMode:'facts' }, tip:'Lists important figures, dates, metrics, and named entities as bullets.' },
+  ], 'Summarizes the selection. If nothing is selected, the page title and main body text are sent instead.');
   const translateDD = makeDropdown('Translate', [
-    { label:'→ English', value:'translate', payload:{ translateTarget:'en' } },
-    { label:'→ French', value:'translate', payload:{ translateTarget:'fr' } },
-    { label:'→ Spanish', value:'translate', payload:{ translateTarget:'es' } },
-    { label:'→ German', value:'translate', payload:{ translateTarget:'de' } },
-    { label:'→ Portuguese', value:'translate', payload:{ translateTarget:'pt' } },
-    { label:'Auto → English', value:'translate', payload:{ translateTarget:'auto' } },
-  ], 'Translate the selected text to the chosen language.');
+    { label:'→ English', value:'translate', payload:{ translateTarget:'en' }, tip:'Translates the text into English while keeping tone and formatting.', tipAlign:'left' },
+    { label:'→ French', value:'translate', payload:{ translateTarget:'fr' }, tip:'Translates into French with native phrasing and preserved entities.', tipAlign:'left' },
+    { label:'→ Spanish', value:'translate', payload:{ translateTarget:'es' }, tip:'Translates into Spanish, maintaining key terms and numbers.', tipAlign:'left' },
+    { label:'→ German', value:'translate', payload:{ translateTarget:'de' }, tip:'Translates into German with neutral professional tone.', tipAlign:'left' },
+    { label:'→ Portuguese', value:'translate', payload:{ translateTarget:'pt' }, tip:'Translates into Portuguese, matching context and register.', tipAlign:'left' },
+    { label:'Auto → English', value:'translate', payload:{ translateTarget:'auto' }, tip:'Detects the source language automatically and outputs English.', tipAlign:'left' },
+  ], 'Translates the selection. Without a selection, we send the page title followed by the visible body text snippet.', 'left');
   const writeDD = makeDropdown('Write', [
-    { label:'Concise email (EN)', value:'write', payload:{ writeType:'email' } },
-    { label:'LinkedIn post', value:'write', payload:{ writeType:'linkedin' } },
-    { label:'Tweet / short social', value:'write', payload:{ writeType:'tweet' } },
-    { label:'Meeting minutes', value:'write', payload:{ writeType:'minutes' } },
-    { label:'Conventional commit', value:'write', payload:{ writeType:'commit' } },
-  ], 'Generate text from the current context (email, post, etc.).');
+    { label:'Concise email (EN)', value:'write', payload:{ writeType:'email' }, tip:'Drafts a friendly-but-professional English email with greeting, key points, and closing.', tipAlign:'left' },
+    { label:'LinkedIn post', value:'write', payload:{ writeType:'linkedin' }, tip:'Creates a 250–350 word LinkedIn update with hook, insights, and light call-to-action.', tipAlign:'left' },
+    { label:'Tweet / short social', value:'write', payload:{ writeType:'tweet' }, tip:'Generates a <280 character social post with one key message and ≤2 hashtags.', tipAlign:'left' },
+    { label:'Meeting minutes', value:'write', payload:{ writeType:'minutes' }, tip:'Outputs structured minutes with Agenda, Key Decisions, and Action Items sections.', tipAlign:'left' },
+    { label:'Conventional commit', value:'write', payload:{ writeType:'commit' }, tip:'Produces a Conventional Commit (type(scope): subject) plus optional bullet body.', tipAlign:'left' },
+  ], 'Generates new text. If nothing is selected, we use the page title plus a short body excerpt as context.', 'left');
   const rewriteDD = makeDropdown('Rewrite', [
-    { label:'Simplify (clear & plain)', value:'rewrite', payload:{ style:'simplify' } },
-    { label:'More formal/professional', value:'rewrite', payload:{ style:'formal' } },
-    { label:'Friendlier / conversational', value:'rewrite', payload:{ style:'friendly' } },
-    { label:'Shorter / concise', value:'rewrite', payload:{ style:'shorten' } },
-    { label:'Longer / more details', value:'rewrite', payload:{ style:'expand' } },
-  ], 'Rewrite the selected text in the desired style.');
+    { label:'Simplify (clear & plain)', value:'rewrite', payload:{ style:'simplify' }, tip:'Rewrites in plain language, shorter sentences, and removes jargon.', tipAlign:'left' },
+    { label:'More formal/professional', value:'rewrite', payload:{ style:'formal' }, tip:'Polishes the tone to be formal and business-ready.', tipAlign:'left' },
+    { label:'Friendlier / conversational', value:'rewrite', payload:{ style:'friendly' }, tip:'Lightens the tone for a warm, conversational style.', tipAlign:'left' },
+    { label:'Shorter / concise', value:'rewrite', payload:{ style:'shorten' }, tip:'Compresses the text while keeping core information intact.', tipAlign:'left' },
+    { label:'Longer / more details', value:'rewrite', payload:{ style:'expand' }, tip:'Expands with extra context, examples, or clarifications.', tipAlign:'left' },
+  ], 'Rewrites the selection. If no selection exists, the page title and body snippet are used instead.');
 
   grid.appendChild(summarizeDD.wrap);
   grid.appendChild(translateDD.wrap);
@@ -391,7 +442,7 @@ export function ensurePanel() {
   let headerTimer: number | null = null;
   let panelTimer: number | null = null;
   function startLoading() {
-    try { stopLoading() } catch {}
+    try { stopLoading() } catch (err) { debugError('stopLoading before startLoading failed', err) }
     const headerRaw = ['one.webp','two.webp'];
     const panelRaw  = ['three.webp','four.webp'];
     const headerUrls = headerRaw.map((p) => chrome.runtime.getURL(p));
@@ -403,7 +454,7 @@ export function ensurePanel() {
         return await new Promise<string>((resolve, reject) => {
           const fr = new FileReader(); fr.onload = () => resolve(String(fr.result)); fr.onerror = reject; fr.readAsDataURL(blob);
         });
-      } catch { return extUrl }
+      } catch (err) { debugError('Failed to convert loader image to data URL', err); return extUrl }
     }
     let hi = 0, pi = 0;
     const img = new Image();
@@ -449,8 +500,6 @@ export function ensurePanel() {
     if (panelTimer)  { clearTimeout(panelTimer);  panelTimer = null }
     if (headerLoaderImg) headerLoaderImg.src = chrome.runtime.getURL('two.webp');
   }
-  state.panelAPI = { startLoading, stopLoading };
-
   const wrap = root.querySelector('.wrap') as HTMLDivElement;
   stopBtn.style.width = 'calc(100% - 24px)';
   stopBtn.style.margin = '8px 12px';
@@ -488,17 +537,17 @@ export function ensurePanel() {
           titleEl.textContent = 'DACTI';
           outEl.textContent = msg;
         }
-      } catch {}
+      } catch (err) { debugError('Failed to update availability status text', err) }
     }
     let availability = 'unknown' as string;
     try {
       if (Summ && (Summ as any).availability) availability = await (Summ as any).availability();
       else if (LM && (LM as any).availability) availability = await (LM as any).availability();
-    } catch {}
+    } catch (err) { debugError('Local availability probe failed', err) }
     log('local availability state =', availability);
 
     if (availability === 'unavailable') {
-      try { chrome.storage.local.set({ dactiLocalAvailable: false, dactiAvailability: availability }) } catch {}
+      try { chrome.storage.local.set({ dactiLocalAvailable: false, dactiAvailability: availability }) } catch (err) { debugError('Failed to persist "unavailable" local status', err) }
       log('local unavailable → falling back to cloud');
       localAvailable = false;
       renderMode(false, true);
@@ -508,7 +557,7 @@ export function ensurePanel() {
     }
 
     if ((availability === 'downloadable' || availability === 'downloading') && !navigator.userActivation.isActive) {
-      try { chrome.storage.local.set({ dactiLocalAvailable: false, dactiAvailability: availability }) } catch {}
+      try { chrome.storage.local.set({ dactiLocalAvailable: false, dactiAvailability: availability }) } catch (err) { debugError('Failed to persist downloadable status (user activation)', err) }
       log('local requires user activation to download, waiting for user action');
       localAvailable = false;
       renderMode(false, true);
@@ -518,7 +567,7 @@ export function ensurePanel() {
     }
 
     if (!hasSummarizer && !hasPrompt) {
-      try { chrome.storage.local.set({ dactiLocalAvailable: false, dactiAvailability: 'no-apis' }) } catch {}
+      try { chrome.storage.local.set({ dactiLocalAvailable: false, dactiAvailability: 'no-apis' }) } catch (err) { debugError('Failed to persist no-API availability', err) }
       log('no Summarizer/LanguageModel APIs found → cloud only');
       localAvailable = false;
       renderMode(false, true);
@@ -541,7 +590,7 @@ export function ensurePanel() {
                 const frac = Math.min(1, Number(e?.loaded || 0) / Math.max(1, Number(e?.total || 1)));
                 showProgress(frac);
               });
-            } catch {}
+            } catch (err) { debugError('Summarizer monitor registration failed', err) }
           }
         });
         await sm.summarize?.('ok');
@@ -556,7 +605,7 @@ export function ensurePanel() {
                 const frac = Math.min(1, Number(e?.loaded || 0) / Math.max(1, Number(e?.total || 1)));
                 showProgress(frac);
               });
-            } catch {}
+            } catch (err) { debugError('Prompt monitor registration failed', err) }
           }
         });
         await pr.prompt?.('ok');
@@ -565,10 +614,10 @@ export function ensurePanel() {
       localAvailable = true;
       showProgress(1);
       setBadge(true);
-      try { chrome.storage.local.set({ dactiLocalAvailable: true, dactiAvailability: 'available' }) } catch {}
+      try { chrome.storage.local.set({ dactiLocalAvailable: true, dactiAvailability: 'available' }) } catch (err) { debugError('Failed to persist available local status', err) }
       return true;
     } catch (e) {
-      try { chrome.storage.local.set({ dactiLocalAvailable: false, dactiAvailability: 'init-failed', dactiLocalError: String(e?.message || e) }) } catch {}
+      try { chrome.storage.local.set({ dactiLocalAvailable: false, dactiAvailability: 'init-failed', dactiLocalError: String(e?.message || e) }) } catch (err2) { debugError('Failed to persist init-failed status', err2) }
       log('local init failed:', e);
       localAvailable = false;
       setBadge(false, 'Local init failed');
@@ -638,6 +687,11 @@ export function ensurePanel() {
     rewriteDD.btn.classList.toggle('active', kind === 'rewrite');
     writeDD.btn.classList.toggle('active', kind === 'write');
     btnProofread.classList.toggle('active', kind === 'proofread');
+    state.activeKind = kind;
+  }
+  state.panelAPI = { startLoading, stopLoading, setActive };
+  if (state.activeKind) {
+    setActive(state.activeKind);
   }
   const run = async (action: 'summarize' | 'translate' | 'write' | 'rewrite' | 'proofread', params?: any) => {
     setActive(action);
@@ -682,7 +736,7 @@ export function ensurePanel() {
   });
 
   copyBtn.addEventListener('click', async () => {
-    try { await navigator.clipboard.writeText(outEl.textContent || '') } catch {}
+    try { await navigator.clipboard.writeText(outEl.textContent || '') } catch (err) { debugError('Copy to clipboard failed', err) }
   });
 
   let dragging = false, ox = 0, oy = 0, raf = 0;
@@ -713,7 +767,7 @@ export function ensurePanel() {
     const m = map[ev.key];
     if (!m) return;
     ev.preventDefault();
-    try { chrome.storage.local.set({ dactiSummarizeMode: m }) } catch {}
+    try { chrome.storage.local.set({ dactiSummarizeMode: m }) } catch (err) { debugError('Failed to persist summarize mode (hotkey)', err) }
     setActive('summarize');
     run('summarize', { summarizeMode: m });
   });

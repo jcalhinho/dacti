@@ -7,7 +7,7 @@
     "moduleResolution": "Bundler",
     "strict": true,
     "noEmit": true,
-    "types": ["chrome", "node"],   
+    "types": ["chrome", "node", "vitest"],   
     "ignoreDeprecations": "6.0",
     "baseUrl": ".",
     "paths": { "@/*": ["src/*"] }

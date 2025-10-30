@@ -2,6 +2,109 @@
 import { ensurePanel } from './panel';
 import { log, state } from './globals';
 import { secureRender } from './utils';
+import { maskPII } from '@/shared/utils/mask';
+
+declare const ai: any;
+
+function chunkTextParagraphAware(source: string, max = 6000): string[] {
+  const clean = String(source || '')
+    .replace(/\r/g, '')
+    .replace(/\t/g, ' ')
+    .replace(/ {2,}/g, ' ');
+  const paragraphs = clean.split(/\n{2,}/);
+  const chunks: string[] = [];
+  let buffer = '';
+
+  for (const para of paragraphs) {
+    const candidate = buffer ? `${buffer}\n\n${para}` : para;
+    if (candidate.length <= max) {
+      buffer = candidate;
+    } else {
+      if (buffer) chunks.push(buffer);
+      if (para.length <= max) {
+        buffer = para;
+      } else {
+        for (let i = 0; i < para.length; i += max) {
+          chunks.push(para.slice(i, i + max));
+        }
+        buffer = '';
+      }
+    }
+  }
+  if (buffer) chunks.push(buffer);
+  return chunks;
+}
+
+type SummMode = 'tldr' | 'bullets' | 'eli5' | 'sections' | 'facts';
+const SUM_MODES: ReadonlyArray<SummMode> = ['tldr', 'bullets', 'eli5', 'sections', 'facts'];
+
+function normalizeMode(mode: string): SummMode {
+  return (SUM_MODES as readonly string[]).includes(mode) ? (mode as SummMode) : 'bullets';
+}
+
+function buildPromptForMode(mode: SummMode, text: string): string {
+  const base = `Rules:
+- Be faithful to the input.
+- No hallucinations. If unsure, say you are unsure.
+- Do not add prefaces like "In summary".
+- Format the response in Markdown (use headings, bullet lists, **bold**, _italic_, \`code\` when helpful).
+- Do not wrap the entire answer in code fences.
+- When using bullets, always prefix items with "- " (dash + space).`;
+  switch (mode) {
+    case 'tldr':
+      return `${base}
+Task: Summarize in 1–2 crisp sentences (TL;DR). No bullets.
+CONTENT:
+${text}`;
+    case 'eli5':
+      return `${base}
+Task: Explain like I'm five (simple, concrete, friendly). Output 3–6 bullets. Avoid jargon; give tiny examples. Use "- " as bullet prefix.
+CONTENT:
+${text}`;
+    case 'sections':
+      return `${base}
+Task: Create a sectioned outline with short bullets. Headings should be concise and followed by 2–5 bullets each. Use "- " as bullet prefix.
+CONTENT:
+${text}`;
+    case 'facts':
+      return `${base}
+Task: Extract key facts (figures, dates, names, outcomes). Return 5–10 bullets, one fact per bullet. Use "- " as bullet prefix. Repeat numbers exactly; no formatting.
+CONTENT:
+${text}`;
+    case 'bullets':
+    default:
+      return `${base}
+Task: Summarize in 5 concise bullets. Use "- " as bullet prefix. No duplication; neutral tone.
+CONTENT:
+${text}`;
+  }
+}
+
+function postProcessByMode(mode: SummMode, raw: string): string {
+  const text = String(raw || '').trim();
+  if (!text) return text;
+  if (mode === 'tldr') {
+    const sentences = text
+      .replace(/\s+/g, ' ')
+      .split(/(?<=[.!?])\s+/)
+      .filter(Boolean);
+    return sentences.slice(0, 2).join(' ').trim();
+  }
+  if (mode === 'sections') {
+    return text;
+  }
+  const lines = text
+    .split(/\n+/)
+    .map((line) => line.replace(/^[-*•–]\s*/, '').trim())
+    .filter(Boolean);
+  const cap =
+    mode === 'facts'
+      ? Math.min(10, lines.length)
+      : mode === 'eli5'
+      ? Math.min(7, lines.length)
+      : Math.min(5, lines.length);
+  return lines.slice(0, cap).map((line) => '- ' + line).join('\n');
+}
 
 export function setupListeners() {
   chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
@@ -18,40 +121,36 @@ export function setupListeners() {
       (async () => {
         try {
           const text = String(msg.text || '');
-          const mode = String(msg.mode || '');
+          const mode = normalizeMode(String(msg.mode || ''));
           const Summ = (self as any)?.Summarizer || (typeof ai !== 'undefined' ? (ai as any).summarizer : undefined);
           const LM = (self as any)?.LanguageModel || (typeof ai !== 'undefined' ? (ai as any).prompt : undefined);
           log('LOCAL summarize using', { Summ: !!Summ, LM: !!LM, mode });
 
           let out = '';
 
-          function chunkText(s: string, max = 6000): string[] {
-            const clean = String(s || '')
-              .replace(/\r/g, '')
-              .replace(/\t/g, ' ')
-              .replace(/ {2,}/g, ' ');
-            const paras = clean.split(/\n{2,}/);
-            const parts: string[] = [];
-            let buf = '';
-            for (const p of paras) {
-              const add = buf ? buf + '\n\n' + p : p;
-              if (add.length <= max) {
-                buf = add;
-              } else {
-                if (buf) parts.push(buf);
-                if (p.length <= max) {
-                  buf = p;
-                } else {
-                  for (let i = 0; i < p.length; i += max) parts.push(p.slice(i, i + max));
-                  buf = '';
-                }
-              }
+          if (LM && (LM as any).create) {
+            const pr: any = await (LM as any).create({
+              expectedInputs: [{ type: 'text' }],
+              expectedOutputs: [{ type: 'text' }],
+            });
+            const chunks = chunkTextParagraphAware(text, 6000);
+            const partials: string[] = [];
+            for (let i = 0; i < chunks.length; i++) {
+              const prompt = buildPromptForMode(mode, chunks[i]);
+              const resp = await pr.prompt?.(prompt);
+              const str =
+                typeof resp === 'string'
+                  ? resp
+                  : resp?.text
+                  ? String(resp.text)
+                  : Array.isArray(resp) && resp[0]?.text
+                  ? String(resp[0].text)
+                  : String(resp ?? '');
+              const trimmed = str.trim();
+              if (trimmed) partials.push(trimmed);
             }
-            if (buf) parts.push(buf);
-            return parts;
-          }
-
-          if (Summ && (Summ as any).create) {
+            out = partials.length ? partials.join('\n\n') : text;
+          } else if (Summ && (Summ as any).create) {
             const summarizeOne = async (s: string): Promise<string> => {
               const sm: any = await (Summ as any).create({ type: 'key-points', outputLanguage: 'en' });
               return String(await sm.summarize?.(s) ?? '');
@@ -62,7 +161,7 @@ export function setupListeners() {
               const MIN = 800;
 
               const processChunks = async (src: string, maxLen: number): Promise<string> => {
-                const chunks = chunkText(src, maxLen);
+                const chunks = chunkTextParagraphAware(src, maxLen);
                 log('LOCAL summarize chunk plan', { chunks: chunks.length, maxLen });
                 const parts: string[] = [];
                 for (let i = 0; i < chunks.length; i++) {
@@ -80,7 +179,7 @@ export function setupListeners() {
                       if (/quota|too\s+large/i.test(msg) && localMax > MIN) {
                         localMax = Math.max(MIN, Math.floor(localMax * 0.66));
                         log('LOCAL summarize shrink chunk due to quota', { from: attempt.length, nextMax: localMax });
-                        const sub = chunkText(piece, localMax);
+                        const sub = chunkTextParagraphAware(piece, localMax);
                         for (const subpart of sub) {
                           try {
                             const t2 = await summarizeOne(subpart);
@@ -88,7 +187,7 @@ export function setupListeners() {
                           } catch (e2: any) {
                             const m2 = String(e2?.message || e2 || '');
                             if (/quota|too\s+large/i.test(m2) && localMax > MIN) {
-                              const sub2 = chunkText(subpart, Math.max(MIN, Math.floor(localMax * 0.66)));
+                              const sub2 = chunkTextParagraphAware(subpart, Math.max(MIN, Math.floor(localMax * 0.66)));
                               for (const subsub of sub2) {
                                 const t3 = await summarizeOne(subsub).catch(() => '');
                                 if (t3 && t3.trim()) parts.push(t3.trim());
@@ -126,34 +225,11 @@ export function setupListeners() {
                 throw e;
               }
             }
-          } else if (LM && (LM as any).create) {
-            const pr: any = await (LM as any).create({
-              expectedInputs: [{ type: 'text' }],
-              expectedOutputs: [{ type: 'text' }],
-            });
-            const chunks = chunkText(text, 7000);
-            const partials: string[] = [];
-            for (let i = 0; i < chunks.length; i++) {
-              const prompt = [
-                'Summarize the following text clearly as concise bullet points.',
-                mode ? `Mode: ${mode}` : '',
-                `Chunk ${i + 1}/${chunks.length}:`,
-                chunks[i],
-              ]
-                .filter(Boolean)
-                .join('\n\n');
-              const t = String(await pr.prompt?.(prompt) ?? '');
-              if (t.trim()) partials.push(t.trim());
-            }
-            out = partials.join('\n\n');
-            if (partials.length > 1) {
-              const mergePrompt = `Merge and deduplicate the bullet points below into a concise summary (max 8 bullets). Return only the bullets.\n\n${out}`;
-              const merged = String(await pr.prompt?.(mergePrompt) ?? '');
-              if (merged.trim()) out = merged.trim();
-            }
           } else {
             throw new Error('Local summarize API unavailable');
           }
+
+          out = postProcessByMode(mode, out);
 
           if (!out.trim()) {
             out = '(No summary produced by local model)';
@@ -179,7 +255,7 @@ export function setupListeners() {
             expectedInputs: [{ type: 'text' }],
             expectedOutputs: [{ type: 'text' }],
           });
-          const prompt = `Translate into ${target}. Return only the translation.\n\n${text}`;
+          const prompt = `Translate into ${target}. Return only the translation formatted as Markdown (plain text is acceptable). Do not add commentary.\n\n${text}`;
           const out = String(await pr.prompt?.(prompt) ?? '');
           sendResponse({ ok: true, text: out });
         } catch (e: any) {
@@ -202,7 +278,7 @@ export function setupListeners() {
             expectedInputs: [{ type: 'text' }],
             expectedOutputs: [{ type: 'text' }],
           });
-          const prompt = `Rewrite the text with style: ${style}. Return only the result.\n\n${text}`;
+          const prompt = `Rewrite the text with style: ${style}. Return only the result and format it as Markdown (headings, **bold**, _italic_, bullet lists where helpful). Do not add extra commentary.\n\n${text}`;
           const out = String(await pr.prompt?.(prompt) ?? '');
           sendResponse({ ok: true, text: out });
         } catch (e: any) {
@@ -227,11 +303,14 @@ export function setupListeners() {
             });
             const req = [
               'You are a helpful writing assistant.',
+              'Rules:',
+              '- Stay faithful to the context; never invent facts.',
+              '- Use Markdown formatting when it improves clarity (headings, **bold**, _italic_, bullet lists, `code`).',
+              '- Return only the final text (no explanations).',
               'TASK:',
               task,
               'CONTEXT:',
               context,
-              'Return only the final text (no explanations).',
             ].join('\\n\\n');
             out = String(await pr.prompt?.(req) ?? '');
           } else if (Summ && (Summ as any).create) {
@@ -269,6 +348,16 @@ export function setupListeners() {
     }
     if (msg.type === 'DACTI_PANEL_UPDATE') {
       setContent(msg.title, msg.message);
+      return;
+    }
+
+    if (msg.type === 'DACTI_PANEL_ACTIVE') {
+      const kind = String((msg as any).kind || '');
+      if (['summarize','translate','write','rewrite','proofread'].includes(kind)) {
+        state.activeKind = kind as any;
+        ensurePanel();
+        state.panelAPI?.setActive(kind as any);
+      }
       return;
     }
 

@@ -1,11 +1,4 @@
 import { callGeminiApi } from './gemini-api'
-
-export type SummarizeMode = 'tldr' | 'bullets' | 'eli5' | 'sections' | 'facts' ;
-export const SUM_MODES: ReadonlyArray<SummarizeMode> = ['tldr','bullets','eli5','sections','facts'] as const;
-export const isSumMode = (x: unknown): x is SummarizeMode =>
-  typeof x === 'string' && (SUM_MODES as readonly string[]).includes(x);
-
-// Paragraph-aware chunker for consistent summarization chunking
 export function chunkTextParagraphAware(s: string, max = 6000): string[] {
   const clean = String(s || '').replace(/\r/g,'').replace(/\t/g,' ').replace(/ {2,}/g,' ')
   const paras = clean.split(/\n{2,}/)
@@ -28,12 +21,20 @@ export function chunkTextParagraphAware(s: string, max = 6000): string[] {
   if (buf) out.push(buf)
   return out
 }
-function buildPrompt(text: string, mode: SummarizeMode ) {
+
+export type SummarizeMode = 'tldr' | 'bullets' | 'eli5' | 'sections' | 'facts' ;
+export const SUM_MODES: ReadonlyArray<SummarizeMode> = ['tldr','bullets','eli5','sections','facts'] as const;
+export const isSumMode = (x: unknown): x is SummarizeMode =>
+  typeof x === 'string' && (SUM_MODES as readonly string[]).includes(x);
+
+// Paragraph-aware chunker for consistent summarization chunking
+export function buildPrompt(text: string, mode: SummarizeMode ) {
   const baseGuard = `Rules:
 - Be faithful to the input.
 - No hallucinations. If unsure, say you are unsure.
 - Do not add prefaces like "In summary".
-- Output plain text only: no Markdown, no quotes, no code fences.
+- Format the response in Markdown (headings, **bold**, _italic_, bullet lists, \`code\`).
+- Do not wrap the entire answer in code fences.
 - When using bullets, always prefix items with "- " (dash + space).`;
 
   switch (mode) {
@@ -51,7 +52,7 @@ ${text}`
 
     case 'sections':
       return `${baseGuard}
-Task: Create a sectioned outline with short bullets. Headings should be concise and followed by 2–5 bullets each. Use "- " as bullet prefix.
+Task: Create a sectioned outline with Markdown headings (##, ###) and short bullet lists. Headings should be concise and followed by 2–5 bullets each. Use "- " as bullet prefix.
 
 No extra text.
 CONTENT:

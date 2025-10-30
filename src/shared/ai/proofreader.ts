@@ -53,7 +53,7 @@ export async function proofreadText(
         },
       });
       // Prompt instruction: only return the corrected text
-      const prompt = `Correct the grammar and spelling errors in the following text. Provide only the corrected text, without any explanation or introductory sentence.\n\nText:\n"${text}"`;
+      const prompt = `Correct the grammar and spelling errors in the following text. Provide only the corrected text, formatted as Markdown (plain text is acceptable), without any explanation or introductory sentence.\n\nText:\n"${text}"`;
       const resp = await pr.prompt(prompt);
       // Try various property access for result
       if (typeof resp === 'string') return resp;
@@ -82,7 +82,7 @@ export async function proofreadText(
       if (options.onProgress) {
         options.onProgress(0);
       }
-      const prompt = `Correct the grammar and spelling errors in the following text. Provide only the corrected text, without any explanation or introductory sentence.\n\nText:\n"${text}"`;
+      const prompt = `Correct the grammar and spelling errors in the following text. Provide only the corrected text, formatted as Markdown (plain text is acceptable), without any explanation or introductory sentence.\n\nText:\n"${text}"`;
       const result = await callGeminiApi(prompt, { signal: options?.signal });
       if (options.onProgress) {
         options.onProgress(1);

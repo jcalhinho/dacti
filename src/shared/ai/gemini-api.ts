@@ -5,7 +5,14 @@
 //  - dactiProxyUrl: string (e.g., https://your-proxy.example.com)
 //  - dactiProxyToken: string (optional bearer passed to proxy)
 //  - dactiUserApiKey: string (NOT RECOMMENDED; user-provided Gemini key)
-const cloudLog = (...a: any[]) => { try { console.log('[DACTI][CLOUD]', ...a) } catch {} }
+const DBG = true
+const debugWarn = (...a: any[]) => {
+  if (!DBG) return
+  try { console.warn('[DACTI][CLOUD][DBG]', ...a) } catch {}
+}
+const cloudLog = (...a: any[]) => {
+  try { console.log('[DACTI][CLOUD]', ...a) } catch (err) { debugWarn('cloudLog console error', err) }
+}
 export async function callGeminiApi(prompt: string, options: { signal?: AbortSignal } = {}): Promise<string> {
   const {
     dactiCloudEnabled,
@@ -55,7 +62,7 @@ cloudLog('config', {
 }
       if (!proxyUrlRaw) proxyUrlRaw = pick((k) => /proxy.*url/i.test(k) || /PROXY_URL/i.test(k))
       if (!proxyTokenRaw) proxyTokenRaw = pick((k) => /proxy.*token/i.test(k) || /PROXY_TOKEN/i.test(k))
-    } catch {}
+    } catch (err) { debugWarn('Failed to sweep chrome.storage for proxy config', err) }
   }
 
   // Auto-fix: if a proxy URL or user API key exists but cloud mode isn't set, persist a sane default
@@ -69,7 +76,7 @@ cloudLog('config', {
       if (typeof dactiCloudEnabled !== 'boolean') patch.dactiCloudEnabled = true
       await chrome.storage.local.set(patch)
     }
-  } catch {}
+  } catch (err) { debugWarn('Failed to persist cloud defaults', err) }
 
   // Infer mode; cloud enabled by default unless explicitly disabled
   let mode: 'proxy' | 'userkey' | '' = (cloudModeRaw === 'proxy' || cloudModeRaw === 'userkey') ? (cloudModeRaw as any) : ''
@@ -190,5 +197,5 @@ cloudLog('config', {
 }
 
 async function safeText(res: Response) {
-  try { return await res.text() } catch { return '' }
+  try { return await res.text() } catch (err) { debugWarn('Failed to read response text', err); return '' }
 }

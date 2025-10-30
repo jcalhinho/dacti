@@ -26,13 +26,13 @@ return String(out?.text ?? out ?? '').trim()
 
    const target = String(targetLang || 'en')
   const detect = target.toLowerCase() === 'auto'
-  const basePrompt = "Return only plain text, no markdown, no quotes, no preface. "
+  const basePrompt = "Use Markdown formatting when it adds clarity (plain text is acceptable). Do not add a preface. "
   const prompt = detect
-    ? basePrompt + `Detect the source language and translate into English. Return **only** the translation (no quotes, no preface). Preserve numbers and capitalization.
+    ? basePrompt + `Detect the source language and translate into English. Return **only** the translation formatted as Markdown. Preserve numbers and capitalization.
 
 TEXT:
 ${text}`
-    : basePrompt + `Translate the following text into ${target}. Return **only** the translation (no quotes, no preface). Preserve numbers and capitalization.
+    : basePrompt + `Translate the following text into ${target}. Return **only** the translation formatted as Markdown. Preserve numbers and capitalization.
 
 TEXT:
 ${text}`

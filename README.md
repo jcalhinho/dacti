@@ -1,11 +1,148 @@
-# DACTI — Client‑side Web AI (Chrome MV3, TypeScript)
-DACTI summarizes, translates, rewrites and writes **in the browser** using **Chrome Built‑in AI (Gemini Nano)**, with an automatic **Cloud fallback** via proxy. Privacy‑first, offline‑capable.
+# DACTI — Client-side Web AI Assistant for Chrome
 
-## How to run
-1) `pnpm i`  2) `pnpm build`  3) Load `dist/` in `chrome://extensions` (Developer mode → Load unpacked).
+DACTI is a Manifest V3 Chrome extension built for the **Google Chrome Built-in AI Challenge 2025**.  
+It delivers on-device summarisation, translation, rewriting, writing and proofreading by talking directly to **Gemini Nano** through the Chrome Built-in AI APIs, and transparently falls back to a cloud proxy when local models are unavailable.
 
-## APIs used
-Prompt (multimodal), Summarizer, Translator, Writer, Rewriter. (Proofreader disabled in this version.)
+---
 
-## License
-MIT
+## ✨ Highlights
+
+- **Gemini Nano first** – uses the Prompt, Summarizer, Translator, Rewriter, Writer and Proofreader APIs exposed in Chrome.
+- **Hybrid execution** – automatic fallback to a proxy/Gemini cloud endpoint (configurable) with per-call caching and PII masking.
+- **Unified panel** – floating UI with Markdown rendering, contextual tooltips, keyboard shortcuts and context-menu triggers.
+- **Task orchestration** – background service worker manages cancel/abort, progress updates, per-tab queues and session caching.
+- **Hackathon ready** – open-source repo, documented build, offline-capable demo, video/script placeholders.
+
+---
+
+## 🧱 Architecture Overview
+
+```
+├─ src/
+│  ├─ background/      # Service worker (MV3) – menus, commands, request orchestration
+│  ├─ content/         # Panel UI, event bridge, local AI helpers, Markdown renderer
+│  └─ shared/ai/       # Thin wrappers around Gemini APIs (local + cloud fallback)
+│
+├─ public/manifest.json
+├─ scripts/zip.js      # Builds zipped artifact after `pnpm build`
+└─ dist/               # Built extension (load into chrome://extensions)
+```
+
+- **Background** (`background/index.ts`) handles context menus, keyboard shortcuts, action routing, caching and local/cloud switching.
+- **Content** scripts (`content/events.ts`, `content/panel.ts`) render the floating panel, relay progress, execute `ai.*` local APIs and render Markdown results.
+- **Shared AI modules** encapsulate each capability (summarise, translate, rewrite, write, proofread) with consistent prompts and local/cloud options.
+
+---
+
+## 🚀 Getting Started
+
+### Prerequisites
+
+- **Node.js 18+** and **pnpm 9+**
+- **Chrome 130+** (Canary/Beta) with *Built-in AI* support  
+  Enable the experiment flags if needed:
+  - `chrome://flags/#prompt-api-for-gemini-nano`
+  - `chrome://flags/#enable-chrome-built-in-ai`
+- A Google Cloud proxy endpoint (optional, for cloud fallback)
+
+### Installation & Build
+
+```bash
+pnpm install         # Install dependencies
+pnpm dev             # Start Vite in watch mode (rebuilds into dist/)
+pnpm build           # Production build + zip (dist/ and release/dacti-extension.zip)
+pnpm test            # Run Vitest unit tests (secureRender, Markdown rendering, etc.)
+```
+
+### Load in Chrome
+
+1. Open `chrome://extensions`
+2. Enable **Developer mode**
+3. Click **Load unpacked** and choose the `dist/` folder
+
+To refresh after code changes, either run `pnpm dev` in a second terminal (auto rebuilds) or rerun `pnpm build`.
+
+---
+
+## 🧭 Usage Guide
+
+1. **Highlight any text** on a page (or leave nothing selected to use the page title + body).
+2. Trigger DACTI via:
+   - Context menu (`Right click → DACTI • …`)
+   - Toolbar icon (opens the floating panel)
+   - Keyboard shortcuts (`Alt+Shift+1…5` for the predefined summarise modes)
+3. The floating panel displays live progress, supports Markdown output (copy-ready) and lets you cancel/stop ongoing tasks.
+4. Toggle **Local/Cloud** mode, theme, or pick specific variants (summarise modes, translation targets, rewrite styles) directly from the panel.
+
+---
+
+## ⚙️ Configuration & Storage Keys
+
+All preferences are stored in `chrome.storage.local`. Notable keys:
+
+| Key | Description |
+| --- | --- |
+| `dactiLocalOnly` | Force local-only execution (default determined automatically). |
+| `dactiMaskPII` | Enable PII masking when sending to cloud proxy. |
+| `dactiTranslateTarget`, `dactiSummarizeMode`, `dactiRewriteStyle` | Persist last used variants. |
+| `dactiProxyUrl`, `dactiProxyToken` | Configure optional cloud proxy for fallback. |
+| `dactiCloudMode`, `dactiCloudEnabled` | Automatically patched when proxy/token detected. |
+| `dactiTheme` | Panel theme (`auto`, `light`, `dark`). |
+
+Session-specific caches (per-tab) live in `chrome.storage.session` and are cleared by Chrome when the session ends.
+
+---
+
+## 🌐 Cloud Fallback (Optional)
+
+If Gemini Nano is unavailable, DACTI can call a proxy that forwards requests to Gemini 2.0 / Firebase AI Logic. Configure:
+
+```js
+chrome.storage.local.set({
+  dactiProxyUrl: 'https://<your-proxy>/',
+  dactiProxyToken: '<optional bearer>',
+  dactiCloudMode: 'proxy',
+  dactiCloudEnabled: true
+});
+```
+
+If no proxy is supplied but `dactiUserApiKey` is set, the extension falls back to the official Gemini REST API.
+
+---
+
+## 🧪 Testing Checklist
+
+- [ ] Gemini Nano enabled, local summarise/translate/rewrite/write/proofread work offline.
+- [ ] Context-menu actions update the panel (button highlight, progress, cancel).
+- [ ] Panel actions handle no-selection case (page context) correctly.
+- [ ] Markdown output renders as expected (headings, bullet lists, links, inline code).
+- [ ] Cloud proxy fallback tested with connectivity disabled and re-enabled.
+- [ ] Build output loads cleanly in a fresh Chrome profile (`pnpm build`, load dist/ + zip).
+
+---
+
+## 🎥 Submission Assets
+
+For the hackathon submission, prepare:
+
+- **Demo video (< 3 min)** – show installation, panel use, context menus, local/cloud switch, unique value.
+- **Devpost description** – problem statement, features, APIs used, architecture summary.
+- **GitHub README (this file)** – installation, usage, tests.
+- **Public repo & license** – MIT licensed, include build/test instructions.
+- **Feedback form** *(optional)* – required for the “Most Valuable Feedback” prize.
+
+---
+
+## 📝 Roadmap & Known Limitations
+
+- Proofreader local path still prefers English output (Gemini Nano limitation); cloud prompt now emphasises “keep language”.
+- Multimodal Prompt API hooks are stubbed for future use (images/audio).
+- No automated test suite; manual checklist above should be executed before submission.
+- Cloud proxy requires your own infrastructure (sample Node proxy not bundled).
+
+---
+
+## 📄 License
+
+Released under the [MIT License](LICENSE).  
+Feel free to fork, adapt, and build on top of DACTI — contributions welcome!

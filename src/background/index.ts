@@ -1,17 +1,45 @@
-const log = (...a: any[]) => { try { console.log('[DACTI]', ...a) } catch {} }
+const DBG = true
+const debugWarn = (...a: any[]) => {
+  if (!DBG) return
+  try { console.warn('[DACTI][DBG]', ...a) } catch {}
+}
+const log = (...a: any[]) => {
+  try { console.log('[DACTI]', ...a) } catch (err) { debugWarn('console.log failed', err) }
+}
 const CANCELED_MSG = '⛔️ Request canceled by user.'
+type PanelAction = 'summarize' | 'translate' | 'write' | 'rewrite' | 'proofread'
+
+async function markPanelActive(tabId: number | undefined, action: PanelAction) {
+  if (!tabId) return
+  try {
+    await chrome.tabs.sendMessage(tabId, { type: 'DACTI_PANEL_ACTIVE', kind: action })
+  } catch (err) {
+    const msg = String((err as any)?.message || err || '')
+    if (!/receiving end does not exist/i.test(msg)) {
+      debugWarn('Failed to set panel active state', { tabId, action, err: msg })
+    }
+  }
+}
 // --- Task management for cancellation ---
 const tasks = new Map<number, { abort: AbortController, canceled: boolean, jobId: number }>()
 let seq = 0
 function startTask(tabId: number) {
   const t = { abort: new AbortController(), canceled: false, jobId: ++seq }
   const prev = tasks.get(tabId)
-  if (prev) { try { prev.abort.abort() } catch {} }
+  if (prev) {
+    try { prev.abort.abort() } catch (err) { debugWarn('Failed to abort previous task', { tabId, err }) }
+  }
   tasks.set(tabId, t)
   return t
 }
 function getTask(tabId: number) { return tasks.get(tabId) }
-function cancelTask(tabId: number) { const t = tasks.get(tabId); if (t) { t.canceled = true; try { t.abort.abort() } catch {} } }
+function cancelTask(tabId: number) {
+  const t = tasks.get(tabId)
+  if (t) {
+    t.canceled = true
+    try { t.abort.abort() } catch (err) { debugWarn('Abort controller cancel failed', { tabId, err }) }
+  }
+}
 
 chrome.runtime.onMessage.addListener((msg, sender) => {
   if (!msg || typeof msg !== 'object') return
@@ -19,23 +47,64 @@ chrome.runtime.onMessage.addListener((msg, sender) => {
     const tabId = sender?.tab?.id
     if (tabId) {
       cancelTask(tabId)
-      updatePanel(tabId, { message: CANCELED_MSG })
-      progress(tabId, 1)
+      if (!(msg as any).silent) {
+        updatePanel(tabId, { message: CANCELED_MSG })
+        progress(tabId, 1)
+      }
     }
   }
 })
 function stripFences(s: string): string { const m = String(s||'').match(/```(?:json)?\s*([\s\S]*?)```/i); return (m?m[1]:String(s||'')).trim() }
 import { rewriteText } from '@/shared/ai/rewriter'
 import { translateText } from '@/shared/ai/translator'
-import { summarizePage } from '@/shared/ai/summarizer'
+import { summarizePage, isSumMode } from '@/shared/ai/summarizer'
+import type { SummarizeMode } from '@/shared/ai/summarizer'
 import { proofreadText } from '@/shared/ai/proofreader'
 import { writeFromContext } from '@/shared/ai/writer'
 import { callGeminiApi } from '@/shared/ai/gemini-api'
+import { maskPII } from '@/shared/utils/mask'
+// --- Chunking helpers (paragraph-aware + sequential mapper) ---
+function chunkText(s: string, max = 6000): string[] {
+  const clean = String(s || '').replace(/\r/g,'').replace(/\t/g,' ').replace(/ {2,}/g,' ')
+  const paras = clean.split(/\n{2,}/)
+  const out: string[] = []
+  let buf = ''
+  for (const p of paras) {
+    const add = buf ? (buf + '\n\n' + p) : p
+    if (add.length <= max) {
+      buf = add
+    } else {
+      if (buf) out.push(buf)
+      if (p.length <= max) {
+        buf = p
+      } else {
+        for (let i = 0; i < p.length; i += max) out.push(p.slice(i, i + max))
+        buf = ''
+      }
+    }
+  }
+  if (buf) out.push(buf)
+  return out
+}
+
+async function mapChunks(
+  text: string,
+  max: number,
+  worker: (part: string, i: number, total: number) => Promise<string>,
+  joiner = '\n'
+): Promise<string> {
+  const parts = chunkText(text, max)
+  const outs: string[] = []
+  for (let i = 0; i < parts.length; i++) {
+    outs.push(await worker(parts[i], i, parts.length))
+  }
+  return outs.join(joiner)
+}
 
 // -----------------------------
 // Helpers to drive the in-page panel (content script)
 // -----------------------------
-function openPanel(tabId: number | undefined, payload: { title: string; message: string }) {
+function openPanel(tabId: number | undefined, payload: { title: string; message?: string }) {
   if (!tabId) return
   return chrome.tabs.sendMessage(tabId, { type: 'DACTI_PANEL_OPEN', ...payload })
 }
@@ -82,44 +151,6 @@ function hash(str: string) {
   return String(h >>> 0)
 }
 
-// --- Chunking helpers (paragraph-aware + sequential mapper) ---
-function chunkText(s: string, max = 6000): string[] {
-  const clean = String(s || '').replace(/\r/g,'').replace(/\t/g,' ').replace(/ {2,}/g,' ')
-  const paras = clean.split(/\n{2,}/)
-  const out: string[] = []
-  let buf = ''
-  for (const p of paras) {
-    const add = buf ? (buf + '\n\n' + p) : p
-    if (add.length <= max) {
-      buf = add
-    } else {
-      if (buf) out.push(buf)
-      if (p.length <= max) {
-        buf = p
-      } else {
-        for (let i = 0; i < p.length; i += max) out.push(p.slice(i, i + max))
-        buf = ''
-      }
-    }
-  }
-  if (buf) out.push(buf)
-  return out
-}
-
-async function mapChunks(
-  text: string,
-  max: number,
-  worker: (part: string, i: number, total: number) => Promise<string>,
-  joiner = '\n'
-): Promise<string> {
-  const parts = chunkText(text, max)
-  const outs: string[] = []
-  for (let i = 0; i < parts.length; i++) {
-    outs.push(await worker(parts[i], i, parts.length))
-  }
-  return outs.join(joiner)
-}
-
 function sanitizeError(e: any): string {
   const msg = String(e?.message || e || 'An unknown error occurred.')
   if (/fetch failed|network error|offline/i.test(msg)) {
@@ -131,35 +162,7 @@ function sanitizeError(e: any): string {
 // -----------------------------
 // PII masker with Luhn check for credit cards
 // -----------------------------
-function maskPII(s: string) {
-  const luhnCheck = (s: string) => {
-    let sum = 0;
-    let alternate = false;
-    for (let i = s.length - 1; i >= 0; i--) {
-      let n = parseInt(s.charAt(i), 10);
-      if (alternate) {
-        n *= 2;
-        if (n > 9) {
-          n = (n % 10) + 1;
-        }
-      }
-      sum += n;
-      alternate = !alternate;
-    }
-    return (sum % 10) === 0;
-  };
-
-  return s
-    // emails
-    .replace(/([a-zA-Z0-9._%+-]+)@([a-zA-Z0-9.-]+)\.[a-zA-Z]{2,}/g, '[EMAIL]')
-    // phone numbers (more specific)
-    .replace(/\b(?:\+\d{1,3}[-\s]?)?\(?\d{3}\)?[-\s]?\d{3}[-\s]?\d{4}\b/g, '[PHONE]')
-    // payment cards (13–19 digits) with Luhn validation
-    .replace(/\b(\d[ -]*?){13,19}\b/g, (match) => {
-      const digits = match.replace(/\D/g, '');
-      return luhnCheck(digits) ? '[CARD]' : match;
-    });
-}
+import { maskPII } from '@/shared/utils/mask'
 
 // -----------------------------
 // Context Menus (right-click)
@@ -251,12 +254,13 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
     if ((info.menuItemId === 'dacti-translate' || String(info.menuItemId).startsWith('dacti-tr-')) && info.selectionText) {
       await openPanel(tab?.id, { title: 'DACTI', message: '' });
       await loading(tab?.id, true);
+      await markPanelActive(tab?.id, 'translate');
 
       // Determine target language
       let target = 'en'
       if (String(info.menuItemId).startsWith('dacti-tr-')) {
         target = String(info.menuItemId).replace('dacti-tr-', '')
-        try { await chrome.storage.local.set({ dactiTranslateTarget: target }) } catch {}
+        try { await chrome.storage.local.set({ dactiTranslateTarget: target }) } catch (err) { debugWarn('Failed to store translate target', { err, target }) }
       } else {
         const { dactiTranslateTarget } = await chrome.storage.local.get(['dactiTranslateTarget'])
         target = (typeof dactiTranslateTarget === 'string') ? dactiTranslateTarget : 'en'
@@ -304,12 +308,13 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
     if ((info.menuItemId === 'dacti-rewrite' || String(info.menuItemId).startsWith('dacti-rw-')) && info.selectionText) {
       await openPanel(tab?.id, { title: 'DACTI', message: '' });
       await loading(tab?.id, true);
+      await markPanelActive(tab?.id, 'rewrite');
 
       // Determine style: submenu explicit or last saved for parent click
       let style = 'simplify'
       if (String(info.menuItemId).startsWith('dacti-rw-')) {
         style = String(info.menuItemId).replace('dacti-rw-', '')
-        try { await chrome.storage.local.set({ dactiRewriteStyle: style }) } catch {}
+        try { await chrome.storage.local.set({ dactiRewriteStyle: style }) } catch (err) { debugWarn('Failed to store rewrite style', { err, style }) }
       } else {
         const { dactiRewriteStyle } = await chrome.storage.local.get(['dactiRewriteStyle'])
         style = (typeof dactiRewriteStyle === 'string') ? dactiRewriteStyle : 'simplify'
@@ -340,15 +345,23 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
     if ((info.menuItemId === 'dacti-summarize' || String(info.menuItemId).startsWith('dacti-sum-')) && info.selectionText) {
       await openPanel(tab?.id, { title: 'DACTI', message: '' });
       await loading(tab?.id, true);
+      await markPanelActive(tab?.id, 'summarize');
 
       // Determine mode: submenu explicit or last saved for parent click
-      let mode = 'bullets'
+      let mode: SummarizeMode = 'bullets'
       if (String(info.menuItemId).startsWith('dacti-sum-')) {
-        mode = String(info.menuItemId).replace('dacti-sum-', '')
-        try { await chrome.storage.local.set({ dactiSummarizeMode: mode }) } catch {}
+        const parsed = String(info.menuItemId).replace('dacti-sum-', '')
+        if (isSumMode(parsed)) {
+          mode = parsed
+          try { await chrome.storage.local.set({ dactiSummarizeMode: mode }) } catch (err) { debugWarn('Failed to store summarize mode', { err, mode }) }
+        } else {
+          debugWarn('Invalid summarize mode from context menu', { parsed })
+        }
       } else {
         const { dactiSummarizeMode } = await chrome.storage.local.get(['dactiSummarizeMode'])
-        mode = (typeof dactiSummarizeMode === 'string') ? dactiSummarizeMode : 'bullets'
+        if (isSumMode(dactiSummarizeMode)) {
+          mode = dactiSummarizeMode
+        }
       }
 
       const key = 'sm:' + hash(info.selectionText + '|' + mode + Number(localOnly))
@@ -395,6 +408,7 @@ chrome.commands?.onCommand.addListener(async (command) => {
 
     await openPanel(tab.id, { title: 'DACTI', message: '' });
     await loading(tab.id, true);
+    await markPanelActive(tab.id, 'summarize');
 
     const [{ result: sel } = { result: '' }] = await chrome.scripting.executeScript({
       target: { tabId: tab.id },
@@ -402,8 +416,9 @@ chrome.commands?.onCommand.addListener(async (command) => {
     })
     if (!sel) { updatePanel(tab.id, { message: 'Empty selection.' }); return }
 
-    const mode = command.replace('dacti-sum-','')
-    try { await chrome.storage.local.set({ dactiSummarizeMode: mode }) } catch {}
+    const modeStr = command.replace('dacti-sum-','')
+    const mode: SummarizeMode = isSumMode(modeStr) ? modeStr : 'bullets'
+    try { await chrome.storage.local.set({ dactiSummarizeMode: mode }) } catch (err) { debugWarn('Failed to store summarize mode (command)', { err, mode }) }
 
     const key = 'sm:' + hash(sel + '|' + mode + Number(localOnly))
     const cached = await cacheGet(key)
@@ -429,12 +444,12 @@ chrome.commands?.onCommand.addListener(async (command) => {
     try {
       const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
       if (tab?.id) updatePanel(tab.id, { title: 'DACTI • Error', message: sanitizeError(e) })
-    } catch {}
+    } catch (err) { debugWarn('Failed to propagate command error to panel', err) }
   } finally {
     try {
       const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
       if (tab?.id) { loading(tab.id, false); stopToggle(tab.id, false) }
-    } catch {}
+    } catch (err) { debugWarn('Failed to reset loading state after command', err) }
   }
 })
 
@@ -453,18 +468,24 @@ chrome.action.onClicked.addListener(async (tab) => {
 // --- Cloud mode auto-setup if proxy URL present ---
 async function autoSetupCloudIfPossible() {
   try {
-    const all = await chrome.storage.local.get(null as any)
-    const get = (k: string) => (typeof all?.[k] === 'string' ? String(all[k]).trim() : '')
+    const raw = (await chrome.storage.local.get(null as any)) as unknown
+    const all = (raw && typeof raw === 'object') ? raw as Record<string, unknown> : {}
+    const get = (k: string) => {
+      const v = all[k]
+      return typeof v === 'string' ? v.trim() : ''
+    }
     const candidates = [get('dactiProxyUrl'), get('dactiProxyURL'), get('proxyUrl'), get('PROXY_URL')]
     const url = candidates.find(Boolean)
     if (!url) return
-    const mode = typeof all?.dactiCloudMode === 'string' ? all.dactiCloudMode : ''
-    const enabled = (typeof all?.dactiCloudEnabled === 'boolean') ? all.dactiCloudEnabled : undefined
+    const modeRaw = all['dactiCloudMode']
+    const mode = typeof modeRaw === 'string' ? modeRaw : ''
+    const enabledRaw = all['dactiCloudEnabled']
+    const enabled = (typeof enabledRaw === 'boolean') ? enabledRaw : undefined
     const patch: any = {}
     if (!mode) patch.dactiCloudMode = 'proxy'
     if (enabled === undefined) patch.dactiCloudEnabled = true
     if (Object.keys(patch).length) await chrome.storage.local.set(patch)
-  } catch {}
+  } catch (err) { debugWarn('autoSetupCloudIfPossible failed', err) }
 }
 chrome.runtime.onStartup?.addListener?.(autoSetupCloudIfPossible)
 chrome.runtime.onInstalled.addListener(() => { autoSetupCloudIfPossible() })
@@ -487,13 +508,15 @@ chrome.runtime.onMessage.addListener(async (msg, sender) => {
       stopToggle(tabId, true)
       if (msg.action === 'translate') {
         await loading(tabId, true);
+        await markPanelActive(tabId, 'translate');
         const fromPanel = params?.source === 'panel' && typeof params?.text === 'string'
-        let sel: string = fromPanel
+        const selResult = fromPanel
           ? String(params.text)
-          : (await chrome.scripting.executeScript({ target: { tabId }, func: () => window.getSelection()?.toString() || '' }))[0].result
+          : (await chrome.scripting.executeScript({ target: { tabId }, func: () => window.getSelection()?.toString() || '' }))[0]?.result
+        let sel = typeof selResult === 'string' ? selResult : ''
         if (!sel) {
           const [{ result }] = await chrome.scripting.executeScript({ target: { tabId }, func: () => ({ title: document.title, text: document.body?.innerText?.slice(0, 120000) || '' }) })
-          sel = `${result.title}\n\n${result.text}`
+          sel = `${result?.title}\n\n${result?.text}`
         }
         if (!sel.trim()) return updatePanel(tabId, { message: 'The page is empty or no text was selected.' })
         const target = String(params.translateTarget || 'en')
@@ -525,13 +548,15 @@ chrome.runtime.onMessage.addListener(async (msg, sender) => {
       if (msg.action === 'rewrite') {
         const style = String(params?.style || 'simplify')
         await loading(tabId, true);
+        await markPanelActive(tabId, 'rewrite');
         const fromPanel = params?.source === 'panel' && typeof params?.text === 'string'
-        let sel: string = fromPanel
+        const selResult = fromPanel
           ? String(params.text)
-          : (await chrome.scripting.executeScript({ target: { tabId }, func: () => window.getSelection()?.toString() || '' }))[0].result
+          : (await chrome.scripting.executeScript({ target: { tabId }, func: () => window.getSelection()?.toString() || '' }))[0]?.result
+        let sel = typeof selResult === 'string' ? selResult : ''
         if (!sel) {
           const [{ result }] = await chrome.scripting.executeScript({ target: { tabId }, func: () => ({ title: document.title, text: document.body?.innerText?.slice(0, 120000) || '' }) })
-          sel = `${result.title}\n\n${result.text}`
+          sel = `${result?.title}\n\n${result?.text}`
         }
         if (!sel.trim()) return updatePanel(tabId, { message: 'The page is empty or no text was selected.' })
         const key = 'rw:' + hash(sel + '|' + style + Number(localOnly))
@@ -561,42 +586,45 @@ chrome.runtime.onMessage.addListener(async (msg, sender) => {
 
       if (msg.action === 'summarize') {
         await loading(tabId, true);
+        await markPanelActive(tabId, 'summarize');
         const fromPanel = params?.source === 'panel' && typeof params?.text === 'string'
         let input: string
         if (fromPanel) {
           input = String(params.text)
         } else {
           const [{ result }] = await chrome.scripting.executeScript({ target: { tabId }, func: () => ({ title: document.title, text: document.body?.innerText?.slice(0, 120000) || '' }) })
-          input = `${result.title}\n\n${result.text}`
+          input = `${result?.title}\n\n${result?.text}`
         }
         if (!input.trim()) return updatePanel(tabId, { message: 'Empty selection.' })
         const masked = (!localOnly && dactiMaskPII) ? maskPII(input) : input
-        log('PATH', localOnly ? 'LOCAL' : 'CLOUD', { action: 'summarize', mode: params?.summarizeMode })
-        const key = 'sm:' + hash(masked + String(params.summarizeMode || '') + Number(localOnly))
+        const requestedMode = typeof params.summarizeMode === 'string' ? params.summarizeMode : undefined
+        const mode = requestedMode && isSumMode(requestedMode) ? requestedMode : undefined
+        log('PATH', localOnly ? 'LOCAL' : 'CLOUD', { action: 'summarize', mode })
+        const key = 'sm:' + hash(masked + String(mode || '') + Number(localOnly))
         const cached = await cacheGet(key)
         if (cached) return updatePanel(tabId, { message: String(cached).slice(0,5000) })
         let out: string
         if (localOnly) {
-          const resp: any = await chrome.tabs.sendMessage(tabId, { type: 'DACTI_SUMMARIZE_LOCAL', text: masked, mode: params.summarizeMode })
+          const resp: any = await chrome.tabs.sendMessage(tabId, { type: 'DACTI_SUMMARIZE_LOCAL', text: masked, mode: mode ?? requestedMode ?? '' })
           if (!resp?.ok) throw new Error(resp?.error || 'Local summarize failed')
           out = String(resp.text || '')
           if (!out.trim()) { out = '(no summary produced by local model)' }
         } else {
           try {
-            out = await summarizePage(masked, { localOnly, mode: params.summarizeMode, signal })
+            out = await summarizePage(masked, { localOnly, mode, signal })
           } catch (err: any) {
             log('summarize cloud path error, falling back to direct API', err?.message)
             out = ''
           }
           if (!out || /input\s+is\s+undefined/i.test(String(out))) {
             try {
-              const m = String(params.summarizeMode || 'bullets')
+              const m = mode || 'bullets'
               const prompt = (
-                m === 'tldr'     ? `TL;DR in 1–2 sentences.\n\n${masked}` :
-                m === 'eli5'     ? `Explain simply (ELI5). Use short sentences.\n\n${masked}` :
-                m === 'sections' ? `Summarize by sections with H2/H3 headings.\n\n${masked}` :
-                m === 'facts'    ? `Extract key facts and numbers as bullet points.\n\n${masked}` :
-                                   `Summarize in 5 concise bullet points.\n\n${masked}`
+                m === 'tldr'     ? `TL;DR in 1–2 sentences using Markdown (no fences).\n\n${masked}` :
+                m === 'eli5'     ? `Explain simply (ELI5) using Markdown bullets and **bold** key words. Use short sentences.\n\n${masked}` :
+                m === 'sections' ? `Summarize by sections with Markdown headings (##, ###).\n\n${masked}` :
+                m === 'facts'    ? `Extract key facts and numbers as Markdown bullet points (- item).\n\n${masked}` :
+                                   `Summarize in 5 concise Markdown bullet points (- item).\n\n${masked}`
               )
               out = await callGeminiApi(prompt, { signal })
             } catch (e: any) {
@@ -612,6 +640,7 @@ chrome.runtime.onMessage.addListener(async (msg, sender) => {
 
       if (msg.action === 'write') {
         await loading(tabId, true);
+        await markPanelActive(tabId, 'write');
         let ctx: string
         if (params?.source === 'panel' && typeof params?.text === 'string') {
           ctx = String(params.text)
@@ -622,11 +651,15 @@ chrome.runtime.onMessage.addListener(async (msg, sender) => {
         const input = (!localOnly && dactiMaskPII) ? maskPII(ctx) : ctx
         const wt = String(params.writeType || 'email')
         const map: Record<string,string> = {
-          email: 'Draft a concise email (400-600 words) in English.',
-          linkedin: 'Write a professional LinkedIn post (300-400 words) about the context. Keep it approachable and clear.',
-          tweet: 'Write a short social post (max 1500 chars) with a friendly tone.',
-          minutes: 'Write meeting minutes: agenda, key decisions, action items with owners.',
-          commit: 'Write a conventional commit message summarizing the changes (type(scope): subject).',
+          email: 'You are a helpful assistant. Write a clear, friendly but professional email in English for the given audience. Open with a short greeting, include the key points (max 4 bullet-equivalent sentences), a clear action/request, and end with a polite closing. Use Markdown (**bold**, _italic_, bullet lists) to highlight key elements, and do not invent facts beyond the context.',
+          linkedin: 'Create a professional yet approachable LinkedIn post in English (250-350 words). Begin with a hook that explains why the update matters, highlight 2-3 concrete takeaways (use Markdown headings or bullets), invite discussion at the end, and avoid hashtags beyond at most two relevant ones. Stick strictly to the provided context.',
+          tweet: 'Write a concise social update (max 280 characters). Use an engaging tone, present one key message, add a short call-to-action, and use at most two relevant hashtags. Markdown emphasis (e.g., **bold**) is allowed. No emojis and do not fabricate information beyond the supplied context.',
+          minutes: 'Produce structured meeting minutes. Include sections: "Agenda", "Key Decisions" (bullet list), "Action Items" (bullet list with owners and due dates if available). Format the output with Markdown headings and bullets, keep each bullet under 120 characters, and do not invent decisions outside the context.',
+          commit: `Compose a Conventional Commit message summarizing the changes. Format:
+type(scope): concise subject
+- detail line 1
+- detail line 2 (optional)
+Only use types feat/fix/chore/docs/refactor/test/style/perf/build and keep subject <= 60 chars. Use Markdown bullet points only in the body section, and rely strictly on the context provided.`,
         }
         const key = 'wr:' + hash(input + wt + Number(localOnly))
         const cached = await cacheGet(key)
@@ -675,6 +708,7 @@ chrome.runtime.onMessage.addListener(async (msg, sender) => {
       if (msg.action === 'proofread') {
         await openPanel(tabId, { title: 'DACTI', message: '' })
         loading(tabId, true)
+        await markPanelActive(tabId, 'proofread');
         const text = String(params.text || '')
         if (!text.trim()) return updatePanel(tabId, { message: 'Empty text.' })
 

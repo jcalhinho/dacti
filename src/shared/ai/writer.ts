@@ -23,12 +23,14 @@ export async function writeFromContext(
     throw new Error('Local-only mode is enabled; cloud write is disabled.')
   }
 
-  const prompt = `Write according to the instruction.
+  const prompt = `You are a detail-oriented writing assistant.
 Rules:
-- Be concise and concrete.
-- No boilerplate like "Here is".
-- Keep entities and numbers from the context.
-- Output only the final text.
+- Follow the instruction precisely.
+- Stay faithful to the context; never invent facts.
+- Match the requested tone and structure.
+- Keep entities and numbers as given.
+- Use Markdown formatting when it improves readability (headings, **bold**, _italic_, bullet lists, \`code\`).
+- Output only the final text (no preface or explanation).
 
 Instruction:
 ${task.task}

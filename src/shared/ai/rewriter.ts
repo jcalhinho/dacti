@@ -28,7 +28,8 @@ Rules:
 - Do not add facts.
 - No meta commentary.
 - Keep URLs, numbers and entities.
-- Output only the rewritten text. No markdown, no asterisks, no special formatting.
+- Format the answer in Markdown (headings, **bold**, _italic_, bullet lists when it helps). Do not wrap everything in code fences.
+- Output only the rewritten text, with no extra commentary.
 
 Style: ${cfg.style}
 
