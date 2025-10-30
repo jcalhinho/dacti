@@ -555,6 +555,7 @@ export function ensurePanel() {
       else if (LM && (LM as any).availability) availability = await (LM as any).availability();
     } catch (err) { debugError('Local availability probe failed', err) }
     log('local availability state =', availability);
+    const needsDownload = availability === 'downloadable' || availability === 'downloading';
 
     if (availability === 'unavailable') {
       try { chrome.storage.local.set({ dactiLocalAvailable: false, dactiAvailability: availability }) } catch (err) { debugError('Failed to persist "unavailable" local status', err) }
@@ -585,7 +586,7 @@ export function ensurePanel() {
       showStatus('🚫 Local mode unavailable: `ai.summarizer`/`ai.prompt` APIs are missing. Switching to Cloud.\nTip: To test local capabilities, check your Chrome settings and flags (chrome://flags) to enable the Prompt API / on-device models, then reopen the panel.');
       return false;
     }
-    if (availability === 'downloadable' || availability === 'downloading') {
+    if (needsDownload) {
       if (!__initEverCompleted) {
         __initInProgress = true;
         showStatus(DOWNLOAD_STATUS_MSG, true);
@@ -598,7 +599,9 @@ export function ensurePanel() {
           outputLanguage: 'en',
           monitor(m: any) {
             __initInProgress = true;
-            setStatusMessage(DOWNLOAD_STATUS_MSG);
+            if (needsDownload && !__initEverCompleted) {
+              setStatusMessage(DOWNLOAD_STATUS_MSG);
+            }
             try {
               m.addEventListener?.('downloadprogress', (e: any) => {
                 const frac = Math.min(1, Number(e?.loaded || 0) / Math.max(1, Number(e?.total || 1)));
@@ -614,7 +617,9 @@ export function ensurePanel() {
           expectedOutputs: [{ type: 'text' }],
           monitor(m: any) {
             __initInProgress = true;
-            setStatusMessage(DOWNLOAD_STATUS_MSG);
+            if (needsDownload && !__initEverCompleted) {
+              setStatusMessage(DOWNLOAD_STATUS_MSG);
+            }
             try {
               m.addEventListener?.('downloadprogress', (e: any) => {
                 const frac = Math.min(1, Number(e?.loaded || 0) / Math.max(1, Number(e?.total || 1)));
