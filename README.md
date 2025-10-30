@@ -44,6 +44,15 @@ DACTI is a Manifest V3 Chrome extension that delivers on-device summarisation, t
   - `chrome://flags/#enable-chrome-built-in-ai`
 - A Google Cloud proxy endpoint (optional, for cloud fallback)
 
+### Local Model Hardware Notes
+
+Gemini Nano targets relatively recent hardware. Google occasionally updates the official requirements, so check the latest Chrome Built-in AI documentation for authoritative guidance.
+
+Practical tips from testing:
+
+- The first download can take several minutes depending on internet speed and disk throughput—keep Chrome open and the machine powered during this step.
+- Keep `chrome://flags/#enable-chrome-built-in-ai` and `chrome://flags/#prompt-api-for-gemini-nano` enabled, then restart Chrome after changing them.
+
 ### Installation & Build
 
 ```bash

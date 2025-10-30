@@ -195,6 +195,21 @@ export function ensurePanel() {
 
   const { root, host, header, titleEl, outEl, btnProofread, closeBtn, controls, grid, copyBtn } = createPanelElements();
 
+  const INIT_STATUS_MSG = 'Initializing the AI engine… preparing Local/Cloud mode. Please wait.';
+  const DOWNLOAD_STATUS_MSG = 'Downloading the on-device AI model… Hang tight while we finish the first-time setup.';
+  const canReplaceStatus = () => {
+    const current = (outEl.textContent || '').trim();
+    return !current || current === INIT_STATUS_MSG || current === DOWNLOAD_STATUS_MSG;
+  };
+  const setStatusMessage = (msg: string, force = false) => {
+    try {
+      if (force || canReplaceStatus()) {
+        titleEl.textContent = 'DACTI';
+        outEl.textContent = msg;
+      }
+    } catch (err) { debugError('Failed to update status text', err); }
+  };
+
   let mql: MediaQueryList | null = null;
   const applyTheme = (mode: 'auto'|'light'|'dark') => {
     if (mql) { mql.onchange = null; mql = null }
@@ -436,7 +451,7 @@ export function ensurePanel() {
   progressWrap.appendChild(progressBar);
 
   if (!state.initMessageShown) {
-    outEl.textContent = 'Initializing the AI engine… preparing Local/Cloud mode. Please wait.';
+    setStatusMessage(INIT_STATUS_MSG, true);
     state.initMessageShown = true;
     console.log('[DEBUG] Message shown');
   }
@@ -533,15 +548,7 @@ export function ensurePanel() {
     const hasSummarizer = !!(Summ && (Summ as any).create);
     const hasPrompt = !!(LM && (LM as any).create);
     log('detectLocalAvailability:', { hasSummarizer, hasPrompt, Summ: !!Summ, LM: !!LM });
-    const showStatus = (msg: string) => {
-      try {
-        const current = (outEl.textContent || '').trim();
-        if (!current) {
-          titleEl.textContent = 'DACTI';
-          outEl.textContent = msg;
-        }
-      } catch (err) { debugError('Failed to update availability status text', err) }
-    }
+    const showStatus = (msg: string, force = false) => setStatusMessage(msg, force);
     let availability = 'unknown' as string;
     try {
       if (Summ && (Summ as any).availability) availability = await (Summ as any).availability();
@@ -579,7 +586,10 @@ export function ensurePanel() {
       return false;
     }
     if (availability === 'downloadable' || availability === 'downloading') {
-      if (!__initEverCompleted) { __initInProgress = true }
+      if (!__initEverCompleted) {
+        __initInProgress = true;
+        showStatus(DOWNLOAD_STATUS_MSG, true);
+      }
     }
     try {
       if (hasSummarizer) {
@@ -588,6 +598,7 @@ export function ensurePanel() {
           outputLanguage: 'en',
           monitor(m: any) {
             __initInProgress = true;
+            setStatusMessage(DOWNLOAD_STATUS_MSG);
             try {
               m.addEventListener?.('downloadprogress', (e: any) => {
                 const frac = Math.min(1, Number(e?.loaded || 0) / Math.max(1, Number(e?.total || 1)));
@@ -603,6 +614,7 @@ export function ensurePanel() {
           expectedOutputs: [{ type: 'text' }],
           monitor(m: any) {
             __initInProgress = true;
+            setStatusMessage(DOWNLOAD_STATUS_MSG);
             try {
               m.addEventListener?.('downloadprogress', (e: any) => {
                 const frac = Math.min(1, Number(e?.loaded || 0) / Math.max(1, Number(e?.total || 1)));
@@ -656,7 +668,8 @@ export function ensurePanel() {
     renderMode(currentLocal, locked && !currentLocal);
     setBadge(currentLocal);
     state.modeChosen = true;
-    if ((outEl.textContent || '').startsWith('Initializing the AI engine…')) {
+    const statusText = (outEl.textContent || '').trim();
+    if (statusText === INIT_STATUS_MSG || statusText === DOWNLOAD_STATUS_MSG) {
       outEl.textContent = '';
     }
   });
