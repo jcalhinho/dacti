@@ -48,11 +48,11 @@ cloudLog('config', {
   // Last-resort sweep across all keys if nothing found (handles dev console sets)
   if (!proxyUrlRaw || !proxyTokenRaw) {
     try {
-      const all: Record<string, any> = await chrome.storage.local.get(null as any)
-      const pick = (pred: (k: string, v: any) => boolean) => {
-        for (const [k,v] of Object.entries(all||{})) if (pred(k,v)) return typeof v === 'string' ? v.trim() : ''
-        return ''
-      }
+      const all = (await chrome.storage.local.get()) as Record<string, unknown>
+      const pick = (pred: (k: string, v: unknown) => boolean) => {
+  for (const [k,v] of Object.entries(all||{})) if (pred(k,v)) return typeof v === 'string' ? v.trim() : ''
+  return ''
+}
       if (!proxyUrlRaw) proxyUrlRaw = pick((k) => /proxy.*url/i.test(k) || /PROXY_URL/i.test(k))
       if (!proxyTokenRaw) proxyTokenRaw = pick((k) => /proxy.*token/i.test(k) || /PROXY_TOKEN/i.test(k))
     } catch {}

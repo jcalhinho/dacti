@@ -2,7 +2,7 @@ import { callGeminiApi } from './gemini-api';
 
 export async function proofreadText(
   text: string,
-  options: { onProgress?: (progress: number) => void; localOnly?: boolean } = {}
+  options: { onProgress?: (progress: number) => void; localOnly?: boolean; signal?: AbortSignal  } = {}
 ): Promise<string> {
   try {
     // @ts-ignore
@@ -31,6 +31,6 @@ export async function proofreadText(
     }
     console.warn("Error with local AI, using Gemini Cloud API:", e);
     const prompt = `Correct the grammar and spelling errors in the following text. Provide only the corrected text, without any explanation or introductory sentence.\n\nText:\n"${text}"`;
-    return callGeminiApi(prompt);
+    return callGeminiApi(prompt, { signal: options?.signal })
   }
 }
