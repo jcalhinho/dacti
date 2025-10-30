@@ -1,17 +1,16 @@
 # DACTI — Client-side Web AI Assistant for Chrome
 
-DACTI is a Manifest V3 Chrome extension built for the **Google Chrome Built-in AI Challenge 2025**.  
-It delivers on-device summarisation, translation, rewriting, writing and proofreading by talking directly to **Gemini Nano** through the Chrome Built-in AI APIs, and transparently falls back to a cloud proxy when local models are unavailable.
+DACTI is a Manifest V3 Chrome extension that delivers on-device summarisation, translation, rewriting, writing and proofreading by talking directly to **Gemini Nano** through the Chrome Built-in AI APIs, and transparently falls back to a cloud proxy when local models are unavailable.
 
 ---
 
 ## ✨ Highlights
 
-- **Gemini Nano first** – uses the Prompt, Summarizer, Translator, Rewriter, Writer and Proofreader APIs exposed in Chrome.
-- **Hybrid execution** – automatic fallback to a proxy/Gemini cloud endpoint (configurable) with per-call caching and PII masking.
+- **Gemini Nano first** – uses the Prompt, Summarizer, Translator, Rewriter, Writer and Proofreader APIs built into Chrome.
+- **Hybrid execution** – automatic fallback to a proxy/Gemini cloud endpoint (configurable) avec per-call caching and PII masking.
 - **Unified panel** – floating UI with Markdown rendering, contextual tooltips, keyboard shortcuts and context-menu triggers.
 - **Task orchestration** – background service worker manages cancel/abort, progress updates, per-tab queues and session caching.
-- **Hackathon ready** – open-source repo, documented build, offline-capable demo, video/script placeholders.
+- **Ready for production flows** – open-source repo, documented build, and automated tests with Vitest.
 
 ---
 
@@ -121,23 +120,11 @@ If no proxy is supplied but `dactiUserApiKey` is set, the extension falls back t
 
 ---
 
-## 🎥 Submission Assets
-
-For the hackathon submission, prepare:
-
-- **Demo video (< 3 min)** – show installation, panel use, context menus, local/cloud switch, unique value.
-- **Devpost description** – problem statement, features, APIs used, architecture summary.
-- **GitHub README (this file)** – installation, usage, tests.
-- **Public repo & license** – MIT licensed, include build/test instructions.
-- **Feedback form** *(optional)* – required for the “Most Valuable Feedback” prize.
-
----
-
 ## 📝 Roadmap & Known Limitations
 
 - Proofreader local path still prefers English output (Gemini Nano limitation); cloud prompt now emphasises “keep language”.
 - Multimodal Prompt API hooks are stubbed for future use (images/audio).
-- No automated test suite; manual checklist above should be executed before submission.
+- Automated tests currently cover Markdown rendering, PII masking, chunking and panel state; end-to-end flows remain manual.
 - Cloud proxy requires your own infrastructure (sample Node proxy not bundled).
 
 ---
