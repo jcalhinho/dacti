@@ -279,6 +279,7 @@ export function ensurePanel() {
       local ? 'Local mode (on-device Gemini Nano).' : 'Cloud mode (proxy/API).',
       'On launch: Auto tries Local if available; otherwise Cloud.',
       locked && !local ? 'Local model not installed/compatible → locked to Cloud.' : '',
+      cloudAvailable === false ? 'Cloud fallback not configured yet — add a proxy or API key in Settings.' : '',
     ].filter(Boolean).join(' ');
     switchEl.title = tip;
     cloudLbl.title = tip;
@@ -320,7 +321,11 @@ export function ensurePanel() {
     const baseTip = isLocal
       ? (offline ? 'Local on-device — offline.' : 'Local mode (on-device Gemini Nano).')
       : 'Cloud mode (proxy/API).';
-    badge.title = [baseTip, tipExtra].filter(Boolean).join(' ');
+    const extraBits = [
+      tipExtra,
+      cloudAvailable === false ? 'Cloud fallback not configured.' : ''
+    ].filter(Boolean).join(' ');
+    badge.title = [baseTip, extraBits].filter(Boolean).join(' ');
   }
   header.appendChild(badge);
   header.appendChild(closeBtn);
@@ -527,9 +532,35 @@ export function ensurePanel() {
   let localAvailable = false;
   let userMode: 'auto'|'local'|'cloud' = 'auto';
   let userTouchedToggle = false;
+  let cloudAvailable: boolean | null = null;
 
   let __initEverCompleted = false;
   let __initInProgress = false;
+
+  const refreshCloudAvailability = async (): Promise<boolean> => {
+    try {
+      const {
+        dactiProxyUrl,
+        dactiProxyURL,
+        proxyUrl,
+        PROXY_URL,
+        dactiUserApiKey
+      } = await chrome.storage.local.get([
+        'dactiProxyUrl',
+        'dactiProxyURL',
+        'proxyUrl',
+        'PROXY_URL',
+        'dactiUserApiKey'
+      ]);
+      const hasProxy = [dactiProxyUrl, dactiProxyURL, proxyUrl, PROXY_URL].some((v) => typeof v === 'string' && v.trim().length);
+      const hasUserKey = typeof dactiUserApiKey === 'string' && dactiUserApiKey.trim().length > 0;
+      cloudAvailable = hasProxy || hasUserKey;
+    } catch (err) {
+      cloudAvailable = false;
+      debugError('Cloud availability check failed', err);
+    }
+    return !!cloudAvailable;
+  };
 
   const showProgress = (p: number) => {
     if (!__initInProgress) return;
@@ -556,6 +587,7 @@ export function ensurePanel() {
     } catch (err) { debugError('Local availability probe failed', err) }
     log('local availability state =', availability);
     const needsDownload = availability === 'downloadable' || availability === 'downloading';
+    const wasDownloading = needsDownload && !__initEverCompleted;
 
     if (availability === 'unavailable') {
       try { chrome.storage.local.set({ dactiLocalAvailable: false, dactiAvailability: availability }) } catch (err) { debugError('Failed to persist "unavailable" local status', err) }
@@ -599,7 +631,7 @@ export function ensurePanel() {
           outputLanguage: 'en',
           monitor(m: any) {
             __initInProgress = true;
-            if (needsDownload && !__initEverCompleted) {
+            if (wasDownloading) {
               setStatusMessage(DOWNLOAD_STATUS_MSG);
             }
             try {
@@ -617,7 +649,7 @@ export function ensurePanel() {
           expectedOutputs: [{ type: 'text' }],
           monitor(m: any) {
             __initInProgress = true;
-            if (needsDownload && !__initEverCompleted) {
+            if (wasDownloading) {
               setStatusMessage(DOWNLOAD_STATUS_MSG);
             }
             try {
@@ -633,6 +665,18 @@ export function ensurePanel() {
       log('local init OK; model available on-device');
       localAvailable = true;
       showProgress(1);
+      if (wasDownloading) {
+        try {
+          const cloudReady = cloudAvailable === null ? await refreshCloudAvailability() : cloudAvailable;
+          const readyMsg = cloudReady
+            ? '✅ Local model download complete. Cloud fallback is configured; use the toggle above to switch modes anytime.'
+            : '✅ Local model download complete. No cloud proxy detected, so DACTI stays on-device unless you add one.';
+          setStatusMessage(readyMsg, true);
+        } catch (err) {
+          debugError('Failed to show local-ready message', err);
+          setStatusMessage('✅ Local model download complete. Ready to run on-device.', true);
+        }
+      }
       setBadge(true);
       try { chrome.storage.local.set({ dactiLocalAvailable: true, dactiAvailability: 'available' }) } catch (err) { debugError('Failed to persist available local status', err) }
       return true;
@@ -649,22 +693,28 @@ export function ensurePanel() {
 
   function effectiveLocal(): boolean {
     if (userMode === 'local') return localAvailable;
-    if (userMode === 'cloud') return false;
+    if (userMode === 'cloud') {
+      if (cloudAvailable === false) return localAvailable;
+      return false;
+    }
     return localAvailable;
   }
 
   window.addEventListener('online', () => { setBadge(effectiveLocal()) });
   window.addEventListener('offline', () => { setBadge(effectiveLocal(), 'Offline') });
 
-  chrome.storage.local.get(['dactiMode']).then(({ dactiMode }) => {
+  chrome.storage.local.get(['dactiMode']).then(async ({ dactiMode }) => {
+    await refreshCloudAvailability();
     const saved = (dactiMode === 'local' || dactiMode === 'cloud') ? dactiMode : 'auto';
-    userMode = saved;
+    userMode = saved === 'cloud' && cloudAvailable === false ? 'auto' : saved;
   });
 
-  detectLocalAvailability().then(() => {
+  Promise.all([detectLocalAvailability(), refreshCloudAvailability()]).then(() => {
     if (!userTouchedToggle) {
-      userMode = localAvailable ? 'local' : 'cloud';
-      chrome.storage.local.set({ dactiMode: userMode, dactiLocalOnly: userMode === 'local' && localAvailable });
+      if (localAvailable) userMode = 'local';
+      else if (cloudAvailable) userMode = 'cloud';
+      else userMode = 'local';
+      chrome.storage.local.set({ dactiMode: userMode, dactiLocalOnly: effectiveLocal() });
     } else {
       chrome.storage.local.set({ dactiLocalOnly: effectiveLocal() });
     }
@@ -677,13 +727,27 @@ export function ensurePanel() {
     if (statusText === INIT_STATUS_MSG || statusText === DOWNLOAD_STATUS_MSG) {
       outEl.textContent = '';
     }
-  });
+  }).catch((err) => { debugError('Initial availability check failed', err); });
 
-  modeInput.addEventListener('change', () => {
+  modeInput.addEventListener('change', async () => {
     userTouchedToggle = true;
     if (!localAvailable && modeInput.checked) {
       modeInput.checked = false;
       return;
+    }
+    if (!modeInput.checked) {
+      const cloudOk = await refreshCloudAvailability();
+      if (!cloudOk) {
+        modeInput.checked = true;
+        userMode = 'local';
+        const localOnly = localAvailable;
+        chrome.storage.local.set({ dactiMode: userMode, dactiLocalOnly: localOnly });
+        setStatusMessage('Cloud mode unavailable: add a proxy URL or API key in settings to enable remote fallback.', false);
+        const locked = !localAvailable;
+        renderMode(true, locked);
+        setBadge(true, localAvailable ? '' : 'Local model unavailable and no cloud fallback configured.');
+        return;
+      }
     }
     userMode = modeInput.checked ? 'local' : 'cloud';
     chrome.storage.local.set({ dactiMode: userMode, dactiLocalOnly: effectiveLocal() });
@@ -718,17 +782,19 @@ export function ensurePanel() {
     setActive(action);
     outEl.blur();
     startLoading();
-    await detectLocalAvailability();
+    await Promise.all([detectLocalAvailability(), refreshCloudAvailability()]);
     if (!userTouchedToggle) {
-      userMode = localAvailable ? 'local' : 'cloud';
-      chrome.storage.local.set({ dactiMode: userMode, dactiLocalOnly: userMode === 'local' && localAvailable });
+      if (localAvailable) userMode = 'local';
+      else if (cloudAvailable) userMode = 'cloud';
+      else userMode = 'local';
+      chrome.storage.local.set({ dactiMode: userMode, dactiLocalOnly: effectiveLocal() });
     } else {
       chrome.storage.local.set({ dactiLocalOnly: effectiveLocal() });
     }
     const localOnly = effectiveLocal();
     renderMode(localOnly, !localAvailable && !localOnly);
     setBadge(localOnly);
-    log('RUN', action, { localOnly, userMode, localAvailable, online: navigator.onLine });
+    log('RUN', action, { localOnly, userMode, localAvailable, cloudAvailable, online: navigator.onLine });
     stopBtn.style.display = 'inline-flex'; (stopBtn as HTMLButtonElement).disabled = false;
     modeInput.disabled = true;
     switchEl.classList.add('disabled');
