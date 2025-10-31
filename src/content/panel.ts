@@ -123,13 +123,22 @@ function createPanelElements() {
     .toolbar { display:flex; gap:8px; padding:8px 12px; border-top:1px solid var(--border); background:var(--subtle); border-bottom-left-radius:20px; border-bottom-right-radius:20px; }
     .toolbar .btn{ justify-content:center; } 
     .small { font-size:12px; display:flex; align-items:center; gap:6px; color:var(--muted); }
+    .sr-only{ position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; border:0; }
     .badge { font-size:11px; padding:2px 6px; border:1px solid var(--badge-border); border-radius:999px; color:var(--accent); background: var(--badge-bg); }
     .header .badge{ margin-left:auto; }
     .loaderImg{ width:12px; height:12px; display:inline-block; object-fit:contain; margin-right:6px; border-radius:2px; }
-    .themeSelect { appearance: none; border:1px solid var(--border); background: var(--btn-bg); color: var(--text); padding: 6px 8px; border-radius: 8px; font-size: 12px; }
-    .toggleRow{ display:flex; align-items:center; gap:8px; }
+    .toggleRow{ display:flex; align-items:center; gap:8px; flex:0 0 auto; }
     .smallLabel{ font-size:11px; color:var(--muted); user-select:none; }
     .wrap[data-theme="dark"] .smallLabel{ color:#94a3b8; }
+    .themeBtnWrap{ position:relative; flex:0 0 auto; display:flex; align-items:center; }
+    .btn.theme{ justify-content:space-between; padding:6px 8px; width:auto; min-width:0; }
+    .btn.theme .left{ gap:4px; align-items:center; }
+    .btn.theme .themeIcon{ display:inline-flex; align-items:center; justify-content:center; width:16px; height:16px; }
+    .btn.theme .themeIcon svg{ width:14px; height:14px; display:block; }
+    .themeMenu{ position:absolute; background:var(--btn-bg); border:1px solid var(--btn-border); border-radius:8px; box-shadow:0 8px 22px rgba(0,0,0,.18); padding:6px; display:none; z-index:9999; min-width:140px; }
+    .themeMenu .dropdownItem{ padding:8px 10px; border-radius:6px; cursor:pointer; font-size:12px; display:flex; align-items:center; gap:8px; }
+    .themeMenu .dropdownItem.selected{ background: color-mix(in srgb, var(--accent) 18%, var(--btn-bg)); }
+    .themeMenu .dropdownItem .itemLabel{ flex:1; }
     .switch{ position:relative; display:inline-block; width:40px; height:22px; }
     .switch input{ opacity:0; width:0; height:0; }
     .slider{ position:absolute; inset:0; cursor:pointer; background:#1a73e8; border-radius:999px; box-shadow:inset 0 1px 2px rgba(0,0,0,.15); transition:background .18s ease; }
@@ -195,6 +204,25 @@ export function ensurePanel() {
 
   const { root, host, header, titleEl, outEl, btnProofread, closeBtn, controls, grid, copyBtn } = createPanelElements();
 
+  type ThemeMode = 'auto'|'light'|'dark';
+  type ResolvedTheme = 'light'|'dark';
+  const SUN_ICON =
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>';
+  const MOON_ICON =
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 0 1 11.21 3 7 7 0 1 0 21 12.79z"/></svg>';
+  let themeBtn: HTMLButtonElement | null = null;
+  let themeMenu: HTMLDivElement | null = null;
+  let themeIconSpan: HTMLSpanElement | null = null;
+  const themeOptionEls: Record<ThemeMode, HTMLDivElement | null> = { auto: null, light: null, dark: null };
+  const themeOptionLabels: Record<ThemeMode, string> = {
+    auto: 'Auto',
+    light: 'Light',
+    dark: 'Dark',
+  };
+  let currentThemeMode: ThemeMode = 'auto';
+  let resolvedTheme: ResolvedTheme = 'light';
+
+
   const INIT_STATUS_MSG = 'Initializing the AI engine… preparing Local/Cloud mode. Please wait.';
   const DOWNLOAD_STATUS_MSG = 'Downloading the on-device AI model… Hang tight while we finish the first-time setup.';
   const canReplaceStatus = () => {
@@ -211,12 +239,53 @@ export function ensurePanel() {
   };
 
   let mql: MediaQueryList | null = null;
-  const applyTheme = (mode: 'auto'|'light'|'dark') => {
-    if (mql) { mql.onchange = null; mql = null }
-    const setBg = (isDark: boolean) => {
-      (root.querySelector('.wrap') as HTMLDivElement).setAttribute('data-theme', isDark ? 'dark' : 'light');
-      (root.querySelector('.wrap') as HTMLDivElement).style.backgroundColor = isDark ? '#0b1220' : '#ffffff';
+  const updateThemeDisplay = () => {
+    if (themeIconSpan) {
+      themeIconSpan.innerHTML = resolvedTheme === 'dark' ? MOON_ICON : SUN_ICON;
     }
+    if (themeBtn) {
+      const title = currentThemeMode === 'auto'
+        ? 'Theme: Auto'
+        : `Theme: ${currentThemeMode === 'dark' ? 'Dark' : 'Light'}`;
+      themeBtn.title = title;
+      themeBtn.dataset.mode = currentThemeMode;
+    }
+    (['auto','light','dark'] as const).forEach((mode) => {
+      const el = themeOptionEls[mode];
+      if (!el) return;
+      const selected = currentThemeMode === mode;
+      el.classList.toggle('selected', selected);
+      el.setAttribute('aria-selected', selected ? 'true' : 'false');
+      if (selected) {
+        el.style.background = '';
+      }
+      if (!selected && !el.matches(':hover')) {
+        el.style.background = '';
+      }
+      if (mode === 'auto') {
+        const label = el.querySelector('.itemLabel');
+        if (label) {
+          label.textContent = themeOptionLabels.auto;
+        }
+      } else {
+        const label = el.querySelector('.itemLabel');
+        if (label) label.textContent = themeOptionLabels[mode];
+      }
+    });
+  };
+
+  const setBg = (isDark: boolean) => {
+    const wrapEl = root.querySelector('.wrap') as HTMLDivElement;
+    if (!wrapEl) return;
+    wrapEl.setAttribute('data-theme', isDark ? 'dark' : 'light');
+    wrapEl.style.backgroundColor = isDark ? '#0b1220' : '#ffffff';
+    resolvedTheme = isDark ? 'dark' : 'light';
+    updateThemeDisplay();
+  };
+
+  const applyTheme = (mode: ThemeMode) => {
+    currentThemeMode = mode;
+    if (mql) { mql.onchange = null; mql = null; }
     if (mode === 'dark') {
       setBg(true);
     } else if (mode === 'light') {
@@ -225,7 +294,16 @@ export function ensurePanel() {
       mql = window.matchMedia('(prefers-color-scheme: dark)');
       const sync = () => setBg(!!mql && mql.matches);
       sync();
-      mql.onchange = sync;
+      if (mql) mql.onchange = sync;
+    }
+    updateThemeDisplay();
+  };
+
+  function setThemeMode(mode: ThemeMode, persist = true) {
+    const next: ThemeMode = mode === 'light' || mode === 'dark' ? mode : 'auto';
+    applyTheme(next);
+    if (persist) {
+      try { chrome.storage.local.set({ dactiTheme: next }); } catch (err) { debugError('Failed to persist theme mode', err); }
     }
   }
 
@@ -290,15 +368,82 @@ export function ensurePanel() {
   modeWrap.appendChild(switchEl);
   modeWrap.appendChild(localLbl);
 
-  const themeWrap = h('div', 'small');
-  const themeSelect = h('select', 'themeSelect') as HTMLSelectElement;
-  ;(['auto','light','dark'] as const).forEach(v => {
-    const o = document.createElement('option');
-    o.value = v;
-    o.textContent = v[0].toUpperCase() + v.slice(1);
-    themeSelect.appendChild(o);
+  const themeWrap = h('div', 'small themeBtnWrap');
+  themeBtn = h('button', 'btn theme has-caret') as HTMLButtonElement;
+  themeBtn.type = 'button';
+  themeBtn.setAttribute('aria-haspopup', 'listbox');
+  themeBtn.setAttribute('aria-expanded', 'false');
+  themeBtn.setAttribute('aria-label', 'Change theme');
+  const themeLeft = h('span', 'left');
+  themeIconSpan = h('span', 'themeIcon') as HTMLSpanElement;
+  const themeIconLabel = h('span', 'sr-only', 'Theme');
+  themeLeft.appendChild(themeIconSpan);
+  themeLeft.appendChild(themeIconLabel);
+  const themeRight = h('span', 'right');
+  const themeCaret = h('span', 'caret', '▾');
+  themeRight.appendChild(themeCaret);
+  themeBtn.appendChild(themeLeft);
+  themeBtn.appendChild(themeRight);
+  themeMenu = h('div', 'themeMenu') as HTMLDivElement;
+  themeMenu.classList.add('dropdownMenu');
+  themeMenu.setAttribute('role', 'listbox');
+  (['auto','light','dark'] as const).forEach((mode) => {
+    const item = h('div', 'dropdownItem') as HTMLDivElement;
+    item.dataset.mode = mode;
+    item.setAttribute('role', 'option');
+    const label = h('span', 'itemLabel', themeOptionLabels[mode]);
+    item.appendChild(label);
+    item.addEventListener('mouseenter', () => { item.style.background = 'color-mix(in srgb, var(--accent), var(--btn-bg) 85%)'; });
+    item.addEventListener('mouseleave', () => {
+      if (!item.classList.contains('selected')) item.style.background = '';
+    });
+    item.addEventListener('click', () => {
+      themeMenu!.style.display = 'none';
+      if (openDropdownMenu === themeMenu) openDropdownMenu = null;
+      item.style.background = '';
+      if (themeBtn) themeBtn.setAttribute('aria-expanded', 'false');
+      setThemeMode(mode, true);
+    });
+    themeMenu.appendChild(item);
+    themeOptionEls[mode] = item;
   });
-  themeWrap.appendChild(themeSelect);
+  themeWrap.appendChild(themeBtn);
+  themeWrap.appendChild(themeMenu);
+  themeBtn.addEventListener('click', (ev) => {
+    ev.stopPropagation();
+    if (!themeMenu) return;
+    const showing = themeMenu.style.display === 'block';
+    if (openDropdownMenu && openDropdownMenu !== themeMenu) {
+      openDropdownMenu.style.display = 'none';
+    }
+    if (showing) {
+      themeMenu.style.display = 'none';
+      if (themeBtn) themeBtn.setAttribute('aria-expanded', 'false');
+      openDropdownMenu = null;
+    } else {
+      themeMenu.style.display = 'block';
+      openDropdownMenu = themeMenu;
+      const rect = themeBtn!.getBoundingClientRect();
+      Object.assign(themeMenu.style, {
+        top: themeBtn.offsetTop + themeBtn.offsetHeight + 4 + 'px',
+        left: '0px',
+        minWidth: rect.width + 'px',
+      });
+      themeBtn.setAttribute('aria-expanded', 'true');
+    }
+  });
+  themeWrap.addEventListener('wheel', () => {
+    if (openDropdownMenu === themeMenu && themeMenu) {
+      themeMenu.style.display = 'none';
+      if (themeBtn) themeBtn.setAttribute('aria-expanded', 'false');
+      openDropdownMenu = null;
+    }
+  });
+  const prefersDark = typeof window !== 'undefined' && typeof window.matchMedia === 'function'
+    ? window.matchMedia('(prefers-color-scheme: dark)').matches
+    : false;
+  resolvedTheme = prefersDark ? 'dark' : 'light';
+  updateThemeDisplay();
 
   const stopBtn = h('button', 'btn stop') as HTMLButtonElement;
   stopBtn.innerHTML = '<span class="spin" aria-hidden="true"></span>Stop';
@@ -337,7 +482,13 @@ export function ensurePanel() {
   if (!(root as any).__dropdownGlobalCloser) {
     (root as any).__dropdownGlobalCloser = true;
     root.addEventListener('click', () => {
-      if (openDropdownMenu) { openDropdownMenu.style.display = 'none'; openDropdownMenu = null }
+      if (openDropdownMenu) {
+        if (openDropdownMenu === themeMenu && themeBtn) {
+          themeBtn.setAttribute('aria-expanded', 'false');
+        }
+        openDropdownMenu.style.display = 'none';
+        openDropdownMenu = null;
+      }
     });
   }
 
@@ -758,13 +909,7 @@ export function ensurePanel() {
 
   chrome.storage.local.get('dactiTheme').then(({ dactiTheme }) => {
     const mode = (dactiTheme === 'light' || dactiTheme === 'dark') ? dactiTheme : 'auto';
-    themeSelect.value = mode;
-    applyTheme(mode);
-  });
-  themeSelect.addEventListener('change', () => {
-    const mode = themeSelect.value as 'auto'|'light'|'dark';
-    chrome.storage.local.set({ dactiTheme: mode });
-    applyTheme(mode);
+    setThemeMode(mode, false);
   });
   function setActive(kind: 'summarize' | 'translate' | 'write' | 'rewrite' | 'proofread') {
     summarizeDD.btn.classList.toggle('active', kind === 'summarize');
